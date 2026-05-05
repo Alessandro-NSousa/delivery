@@ -1,0 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+html,
+body {
+	margin: 0;
+	min-height: 100%;
+	background:
+		radial-gradient(circle at top left, rgba(255, 180, 101, 0.35), transparent 24%),
+		radial-gradient(circle at top right, rgba(18, 92, 70, 0.24), transparent 30%),
+		linear-gradient(180deg, #f9f1e6 0%, #f4ead8 100%);
+	color: #1f2a1f;
+	font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+button,
+a {
+	font: inherit;
+}
+
+a {
+	color: inherit;
+}
+/* You can add global styles to this file, and also import other style files */

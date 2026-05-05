@@ -1,0 +1,60 @@
+spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
+  application:
+    name: delivery-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/delivery}
+    username: ${DB_USERNAME:delivery}
+    password: ${DB_PASSWORD:delivery}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  mvc:
+    problemdetails:
+      enabled: true
+  security:
+    oauth2:
+      client:
+        provider:
+          auth0:
+            issuer-uri: ${AUTH0_ISSUER_URI:https://example.us.auth0.com/}
+        registration:
+          auth0:
+            provider: auth0
+            client-id: ${AUTH0_CLIENT_ID:change-me}
+            client-secret: ${AUTH0_CLIENT_SECRET:change-me}
+            scope: openid,profile,email
+            authorization-grant-type: authorization_code
+            redirect-uri: ${AUTH0_REDIRECT_URI:{baseUrl}/login/oauth2/code/{registrationId}}
+      resourceserver:
+        jwt:
+          issuer-uri: ${AUTH0_ISSUER_URI:https://example.us.auth0.com/}
+          audiences:
+            - ${AUTH0_AUDIENCE:https://api.delivery.local}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+server:
+  error:
+    include-message: always
+  forward-headers-strategy: framework
+
+app:
+  cors:
+    allowed-origins:
+      - ${APP_CORS_ALLOWED_ORIGIN:http://localhost:4200}
