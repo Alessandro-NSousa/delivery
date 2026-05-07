@@ -11,16 +11,16 @@ import { RouterLink } from '@angular/router';
           <p class="eyebrow">Delivery OS</p>
           <h1>Operacao de delivery pronta para cliente e estabelecimento.</h1>
           <p class="summary">
-            Backend Spring Boot e frontend Angular iniciados com base modular, autenticacao preparada e
-            primeiro fluxo de cadastro de estabelecimento em andamento.
+            Backend Spring Boot e frontend Angular agora entregam o primeiro fluxo real do produto:
+            cadastro e listagem de estabelecimentos em tempo real.
           </p>
         </div>
         <div class="status-card">
           <span class="chip">MVP multiestabelecimento</span>
           <ul>
-            <li>Cadastro e listagem de estabelecimentos</li>
-            <li>Seguranca OAuth2/OIDC preparada</li>
-            <li>Arquitetura separada por contextos</li>
+            <li>Cadastro publico de estabelecimentos</li>
+            <li>Lista publica consumida pelo frontend</li>
+            <li>Seguranca OAuth2/OIDC preparada para endurecimento</li>
           </ul>
         </div>
       </header>
@@ -45,7 +45,7 @@ import { RouterLink } from '@angular/router';
         <article class="panel">
           <p class="section-label">Back-end pronto</p>
           <h3>Primeiro slice entregue</h3>
-          <p>API de estabelecimentos, migracao Flyway, seguranca e Problem Details configurados.</p>
+          <p>API de estabelecimentos, migracao Flyway, Problem Details e integracao real com o frontend.</p>
         </article>
 
         <article class="panel">

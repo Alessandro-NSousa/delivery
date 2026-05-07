@@ -5,8 +5,8 @@ spring:
     name: delivery-backend
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/delivery}
-    username: ${L_DB_USER}
-    password: ${L_DB_PASSWORD}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
   flyway:
     enabled: true
   jpa:
