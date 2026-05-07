@@ -35,7 +35,7 @@ public class SecurityConfig {
             .authorizeHttpRequests((authorize) -> authorize
                 .requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/establishments").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/establishments", "/api/establishments/*/products").permitAll()
                 .anyRequest().authenticated()
             )
             .oauth2Login(Customizer.withDefaults())
