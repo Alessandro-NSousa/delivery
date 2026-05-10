@@ -30,6 +30,11 @@ public class EstablishmentController {
         return ResponseEntity.created(URI.create("/api/establishments/" + response.id())).body(response);
     }
 
+    @GetMapping("/api/me/establishments")
+    public List<EstablishmentResponse> listMine() {
+        return establishmentService.listMine();
+    }
+
     @GetMapping("/api/public/establishments")
     public List<EstablishmentResponse> list() {
         return establishmentService.listAll();

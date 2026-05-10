@@ -4,6 +4,8 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
+import { CurrentAccountApi } from '../account/current-account-api';
+import { CurrentAccount } from '../account/current-account.models';
 import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
 import {
@@ -52,22 +54,25 @@ type ProductFormField = keyof typeof initialProductFormValue;
   imports: [ReactiveFormsModule, RouterLink],
   template: `
     <main class="page-shell">
-      <a routerLink="/" class="back-link">Voltar ao hub</a>
+      <a routerLink="/" class="back-link">Voltar ao inicio</a>
 
       <header class="hero-card">
         <div>
-          <p class="eyebrow">Estabelecimento</p>
-          <h1>Cadastre o estabelecimento e publique sua operacao.</h1>
-          <p>
-            Para o primeiro MVP, o foco e colocar a loja no ar com cadastro real e exibicao imediata na area do cliente.
-          </p>
+          <p class="eyebrow">Painel do lojista</p>
+          <h1>Gerencie lojas e cardapio.</h1>
+          <p>Use esta area para manter seus estabelecimentos e publicar produtos.</p>
         </div>
+
         <div class="mini-board">
-          <span>Cadastro publico</span>
-          <span>Validacao no backend</span>
-          <span>Catalogo refletido no cliente</span>
+          <span>{{ currentAccount()?.displayName ?? 'Sessao nao identificada' }}</span>
+          <span>{{ currentAccount()?.email ?? 'Autenticacao necessaria' }}</span>
+          <span>{{ currentAccount()?.profile === 'MERCHANT' ? 'Perfil MERCHANT' : 'Sem acesso de lojista' }}</span>
         </div>
       </header>
+
+      @if (accessMessage()) {
+        <section class="feedback access">{{ accessMessage() }}</section>
+      }
 
       @if (establishmentSuccessMessage()) {
         <section class="feedback success">{{ establishmentSuccessMessage() }}</section>
@@ -85,285 +90,311 @@ type ProductFormField = keyof typeof initialProductFormValue;
         <section class="feedback error">{{ productErrorMessage() }}</section>
       }
 
-      <section class="layout-grid">
-        <div class="form-stack">
-          <form class="panel form-panel" [formGroup]="establishmentForm" (ngSubmit)="submitEstablishment()">
-            <div class="section-heading">
-              <div>
-                <p class="label">Cadastro</p>
-                <h2>Dados do estabelecimento</h2>
+      @if (isWorkspaceLoading()) {
+        <section class="panel blocked-panel">
+          <p class="label">Carregando</p>
+          <h2>Preparando o painel do lojista.</h2>
+        </section>
+      } @else if (!canManageCatalog()) {
+        <section class="panel blocked-panel">
+          <p class="label">Acesso necessario</p>
+          <h2>Entre com uma conta de lojista.</h2>
+          <p>
+            O backend exige autenticacao com perfil MERCHANT para listar suas lojas, cadastrar estabelecimentos e
+            publicar produtos.
+          </p>
+          <a routerLink="/cliente" class="secondary-link">Abrir area do cliente</a>
+        </section>
+      } @else {
+        <section class="layout-grid">
+          <div class="form-stack">
+            <form class="panel form-panel" [formGroup]="establishmentForm" (ngSubmit)="submitEstablishment()">
+              <div class="section-heading">
+                <div>
+                  <p class="label">Cadastro</p>
+                  <h2>Nova loja</h2>
+                </div>
+                <span class="chip">{{ establishments().length }} lojas</span>
               </div>
-              <span class="chip">MVP v1</span>
-            </div>
 
-            <div class="form-grid">
-              <label>
-                <span>Nome fantasia</span>
-                <input formControlName="tradeName" placeholder="Ex.: Lanche Bom" />
-                @if (establishmentFieldInvalid('tradeName')) {
-                  <small>Informe o nome fantasia.</small>
-                }
-              </label>
-
-              <label>
-                <span>Razao social</span>
-                <input formControlName="corporateName" placeholder="Ex.: Lanche Bom LTDA" />
-                @if (establishmentFieldInvalid('corporateName')) {
-                  <small>Informe a razao social.</small>
-                }
-              </label>
-
-              <label>
-                <span>CNPJ</span>
-                <input formControlName="cnpj" inputmode="numeric" placeholder="Somente 14 digitos" />
-                @if (establishmentFieldInvalid('cnpj')) {
-                  <small>Informe um CNPJ com 14 digitos.</small>
-                }
-              </label>
-
-              <label>
-                <span>Telefone</span>
-                <input formControlName="phone" placeholder="Ex.: 11999999999" />
-                @if (establishmentFieldInvalid('phone')) {
-                  <small>Informe um telefone para contato.</small>
-                }
-              </label>
-
-              <label>
-                <span>E-mail</span>
-                <input formControlName="email" type="email" placeholder="contato@loja.com" />
-                @if (establishmentFieldInvalid('email')) {
-                  <small>Informe um e-mail valido.</small>
-                }
-              </label>
-
-              <label>
-                <span>Categoria</span>
-                <select formControlName="category">
-                  @for (category of categories; track category.value) {
-                    <option [value]="category.value">{{ category.label }}</option>
-                  }
-                </select>
-              </label>
-
-              <label class="full-width">
-                <span>Horario de funcionamento</span>
-                <input formControlName="openingHours" placeholder="Ex.: Seg-Dom 18:00-23:30" />
-                @if (establishmentFieldInvalid('openingHours')) {
-                  <small>Informe o horario de funcionamento.</small>
-                }
-              </label>
-            </div>
-
-            <div class="section-heading secondary">
-              <div>
-                <p class="label">Endereco</p>
-                <h2>Local de operacao</h2>
-              </div>
-            </div>
-
-            <div class="form-grid">
-              <label>
-                <span>CEP</span>
-                <input formControlName="zipCode" inputmode="numeric" placeholder="Somente 8 digitos" />
-                @if (establishmentFieldInvalid('zipCode')) {
-                  <small>Informe um CEP com 8 digitos.</small>
-                }
-              </label>
-
-              <label>
-                <span>Rua</span>
-                <input formControlName="street" placeholder="Rua ou avenida" />
-                @if (establishmentFieldInvalid('street')) {
-                  <small>Informe a rua.</small>
-                }
-              </label>
-
-              <label>
-                <span>Numero</span>
-                <input formControlName="number" placeholder="Numero" />
-                @if (establishmentFieldInvalid('number')) {
-                  <small>Informe o numero.</small>
-                }
-              </label>
-
-              <label>
-                <span>Bairro</span>
-                <input formControlName="district" placeholder="Bairro" />
-                @if (establishmentFieldInvalid('district')) {
-                  <small>Informe o bairro.</small>
-                }
-              </label>
-
-              <label>
-                <span>Cidade</span>
-                <input formControlName="city" placeholder="Cidade" />
-                @if (establishmentFieldInvalid('city')) {
-                  <small>Informe a cidade.</small>
-                }
-              </label>
-
-              <label>
-                <span>UF</span>
-                <input formControlName="state" maxlength="2" placeholder="SP" />
-                @if (establishmentFieldInvalid('state')) {
-                  <small>Informe a UF com 2 letras.</small>
-                }
-              </label>
-
-              <label class="full-width">
-                <span>Complemento</span>
-                <input formControlName="complement" placeholder="Opcional" />
-              </label>
-            </div>
-
-            <button class="submit-button" type="submit" [disabled]="isSubmittingEstablishment()">
-              {{ isSubmittingEstablishment() ? 'Cadastrando...' : 'Cadastrar estabelecimento' }}
-            </button>
-          </form>
-
-          <form class="panel form-panel" [formGroup]="productForm" (ngSubmit)="submitProduct()">
-            <div class="section-heading">
-              <div>
-                <p class="label">Catalogo</p>
-                <h2>Produtos da loja</h2>
-              </div>
-              <span class="chip alt">{{ establishments().length }} lojas</span>
-            </div>
-
-            @if (establishments().length === 0) {
-              <div class="empty-box">
-                <p>Cadastre um estabelecimento antes de publicar produtos no cardapio.</p>
-              </div>
-            } @else {
               <div class="form-grid">
-                <label class="full-width">
-                  <span>Estabelecimento</span>
-                  <select #establishmentSelect [value]="selectedEstablishmentId() ?? ''" (change)="selectEstablishment(establishmentSelect.value)">
-                    @for (establishment of establishments(); track establishment.id) {
-                      <option [value]="establishment.id">{{ establishment.tradeName }}</option>
-                    }
-                  </select>
+                <label>
+                  <span>Nome fantasia</span>
+                  <input formControlName="tradeName" placeholder="Ex.: Lanche Bom" />
+                  @if (establishmentFieldInvalid('tradeName')) {
+                    <small>Informe o nome fantasia.</small>
+                  }
                 </label>
 
                 <label>
-                  <span>Nome do item</span>
-                  <input formControlName="name" placeholder="Ex.: X-Burger" />
-                  @if (productFieldInvalid('name')) {
-                    <small>Informe o nome do produto.</small>
+                  <span>Razao social</span>
+                  <input formControlName="corporateName" placeholder="Ex.: Lanche Bom LTDA" />
+                  @if (establishmentFieldInvalid('corporateName')) {
+                    <small>Informe a razao social.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>CNPJ</span>
+                  <input formControlName="cnpj" inputmode="numeric" placeholder="Somente 14 digitos" />
+                  @if (establishmentFieldInvalid('cnpj')) {
+                    <small>Informe um CNPJ com 14 digitos.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>Telefone</span>
+                  <input formControlName="phone" placeholder="Ex.: 11999999999" />
+                  @if (establishmentFieldInvalid('phone')) {
+                    <small>Informe um telefone para contato.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>E-mail</span>
+                  <input formControlName="email" type="email" placeholder="contato@loja.com" />
+                  @if (establishmentFieldInvalid('email')) {
+                    <small>Informe um e-mail valido.</small>
                   }
                 </label>
 
                 <label>
                   <span>Categoria</span>
                   <select formControlName="category">
-                    @for (category of productCategories; track category.value) {
+                    @for (category of categories; track category.value) {
                       <option [value]="category.value">{{ category.label }}</option>
                     }
                   </select>
                 </label>
 
                 <label class="full-width">
-                  <span>Descricao</span>
-                  <input formControlName="description" placeholder="Detalhe ingredientes, tamanho ou porcao" />
-                  @if (productFieldInvalid('description')) {
-                    <small>Informe a descricao do produto.</small>
+                  <span>Horario de funcionamento</span>
+                  <input formControlName="openingHours" placeholder="Ex.: Seg-Dom 18:00-23:30" />
+                  @if (establishmentFieldInvalid('openingHours')) {
+                    <small>Informe o horario de funcionamento.</small>
                   }
-                </label>
-
-                <label>
-                  <span>Preco</span>
-                  <input formControlName="price" type="number" min="0.01" step="0.01" placeholder="32.90" />
-                  @if (productFieldInvalid('price')) {
-                    <small>Informe um preco maior que zero.</small>
-                  }
-                </label>
-
-                <label>
-                  <span>Imagem</span>
-                  <input formControlName="imageUrl" placeholder="https://.../produto.jpg" />
-                  @if (productFieldInvalid('imageUrl')) {
-                    <small>Informe a URL da imagem.</small>
-                  }
-                </label>
-
-                <label class="toggle-field full-width">
-                  <input formControlName="available" type="checkbox" />
-                  <span>Disponivel para venda agora</span>
                 </label>
               </div>
 
-              <button class="submit-button" type="submit" [disabled]="isSubmittingProduct()">
-                {{ isSubmittingProduct() ? 'Publicando produto...' : 'Publicar produto' }}
+              <div class="section-heading secondary">
+                <div>
+                  <p class="label">Endereco</p>
+                  <h2>Dados de operacao</h2>
+                </div>
+              </div>
+
+              <div class="form-grid">
+                <label>
+                  <span>CEP</span>
+                  <input formControlName="zipCode" inputmode="numeric" placeholder="Somente 8 digitos" />
+                  @if (establishmentFieldInvalid('zipCode')) {
+                    <small>Informe um CEP com 8 digitos.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>Rua</span>
+                  <input formControlName="street" placeholder="Rua ou avenida" />
+                  @if (establishmentFieldInvalid('street')) {
+                    <small>Informe a rua.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>Numero</span>
+                  <input formControlName="number" placeholder="Numero" />
+                  @if (establishmentFieldInvalid('number')) {
+                    <small>Informe o numero.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>Bairro</span>
+                  <input formControlName="district" placeholder="Bairro" />
+                  @if (establishmentFieldInvalid('district')) {
+                    <small>Informe o bairro.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>Cidade</span>
+                  <input formControlName="city" placeholder="Cidade" />
+                  @if (establishmentFieldInvalid('city')) {
+                    <small>Informe a cidade.</small>
+                  }
+                </label>
+
+                <label>
+                  <span>UF</span>
+                  <input formControlName="state" maxlength="2" placeholder="SP" />
+                  @if (establishmentFieldInvalid('state')) {
+                    <small>Informe a UF com 2 letras.</small>
+                  }
+                </label>
+
+                <label class="full-width">
+                  <span>Complemento</span>
+                  <input formControlName="complement" placeholder="Opcional" />
+                </label>
+              </div>
+
+              <button class="submit-button" type="submit" [disabled]="isSubmittingEstablishment()">
+                {{ isSubmittingEstablishment() ? 'Cadastrando...' : 'Cadastrar estabelecimento' }}
               </button>
-            }
-          </form>
-        </div>
+            </form>
 
-        <aside class="panel side-panel">
-          <p class="label">Operacao atual</p>
-          <h2>Estabelecimentos cadastrados</h2>
+            <form class="panel form-panel" [formGroup]="productForm" (ngSubmit)="submitProduct()">
+              <div class="section-heading">
+                <div>
+                  <p class="label">Catalogo</p>
+                  <h2>Novo produto</h2>
+                </div>
+                <span class="chip alt">{{ products().length }} itens</span>
+              </div>
 
-          @if (isCatalogLoading()) {
-            <p>Carregando estabelecimentos...</p>
-          } @else if (establishments().length === 0) {
-            <p>Nenhuma loja cadastrada ainda.</p>
-          } @else {
-            <div class="selection-list">
-              @for (establishment of establishments(); track establishment.id) {
-                <button
-                  type="button"
-                  class="selection-item"
-                  [class.active]="establishment.id === selectedEstablishmentId()"
-                  (click)="selectEstablishment(establishment.id)"
-                >
-                  <strong>{{ establishment.tradeName }}</strong>
-                  <span>{{ establishment.address.city }}/{{ establishment.address.state }}</span>
+              @if (establishments().length === 0) {
+                <div class="empty-box">
+                  <p>Cadastre sua primeira loja antes de publicar produtos.</p>
+                </div>
+              } @else {
+                <div class="form-grid">
+                  <label class="full-width">
+                    <span>Estabelecimento</span>
+                    <select #establishmentSelect [value]="selectedEstablishmentId() ?? ''" (change)="selectEstablishment(establishmentSelect.value)">
+                      @for (establishment of establishments(); track establishment.id) {
+                        <option [value]="establishment.id">{{ establishment.tradeName }}</option>
+                      }
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Nome do item</span>
+                    <input formControlName="name" placeholder="Ex.: X-Burger" />
+                    @if (productFieldInvalid('name')) {
+                      <small>Informe o nome do produto.</small>
+                    }
+                  </label>
+
+                  <label>
+                    <span>Categoria</span>
+                    <select formControlName="category">
+                      @for (category of productCategories; track category.value) {
+                        <option [value]="category.value">{{ category.label }}</option>
+                      }
+                    </select>
+                  </label>
+
+                  <label class="full-width">
+                    <span>Descricao</span>
+                    <input formControlName="description" placeholder="Detalhe ingredientes, tamanho ou porcao" />
+                    @if (productFieldInvalid('description')) {
+                      <small>Informe a descricao do produto.</small>
+                    }
+                  </label>
+
+                  <label>
+                    <span>Preco</span>
+                    <input formControlName="price" type="number" min="0.01" step="0.01" placeholder="32.90" />
+                    @if (productFieldInvalid('price')) {
+                      <small>Informe um preco maior que zero.</small>
+                    }
+                  </label>
+
+                  <label>
+                    <span>Imagem</span>
+                    <input formControlName="imageUrl" placeholder="https://.../produto.jpg" />
+                    @if (productFieldInvalid('imageUrl')) {
+                      <small>Informe a URL da imagem.</small>
+                    }
+                  </label>
+
+                  <label class="toggle-field full-width">
+                    <input formControlName="available" type="checkbox" />
+                    <span>Disponivel para venda agora</span>
+                  </label>
+                </div>
+
+                <button class="submit-button" type="submit" [disabled]="isSubmittingProduct()">
+                  {{ isSubmittingProduct() ? 'Publicando produto...' : 'Publicar produto' }}
                 </button>
               }
-            </div>
-          }
+            </form>
+          </div>
 
-          <p class="label roadmap-label">Cardapio selecionado</p>
-          @if (selectedEstablishment(); as establishment) {
-            <h2>{{ establishment.tradeName }}</h2>
-
-            @if (catalogErrorMessage()) {
-              <p class="catalog-error">{{ catalogErrorMessage() }}</p>
-            }
-
-            @if (isProductsLoading()) {
-              <p>Atualizando produtos...</p>
-            } @else if (products().length === 0) {
-              <p>Esta loja ainda nao tem itens publicados.</p>
-            } @else {
-              <div class="product-preview-list">
-                @for (product of products(); track product.id) {
-                  <article class="product-preview">
-                    <div>
-                      <p class="label inner">{{ productCategoryName(product.category) }}</p>
-                      <strong>{{ product.name }}</strong>
-                    </div>
-                    <span>{{ formatPrice(product.price) }}</span>
-                  </article>
-                }
+          <aside class="panel side-panel">
+            <div class="side-header">
+              <div>
+                <p class="label">Sessao ativa</p>
+                <h2>{{ currentAccount()?.displayName }}</h2>
               </div>
-            }
-          } @else {
-            <h2>Selecione uma loja</h2>
-            <p>Depois do primeiro cadastro, escolha o estabelecimento para administrar o cardapio.</p>
-          }
 
-          <p class="label roadmap-label">Proxima prioridade</p>
-          <ol>
-            <li>Sacola com subtotal por estabelecimento.</li>
-            <li>Checkout inicial com forma de pagamento.</li>
-            <li>Status de pedido para cliente e loja.</li>
-          </ol>
+              <button type="button" class="secondary-button" (click)="reloadWorkspace()" [disabled]="isCatalogLoading()">
+                {{ isCatalogLoading() ? 'Atualizando...' : 'Atualizar' }}
+              </button>
+            </div>
 
-          <a routerLink="/cliente" class="secondary-link">Ver area do cliente</a>
-        </aside>
-      </section>
+            <p class="session-email">{{ currentAccount()?.email }}</p>
+
+            <div>
+              <p class="label section-gap">Minhas lojas</p>
+
+              @if (catalogErrorMessage()) {
+                <p class="catalog-error">{{ catalogErrorMessage() }}</p>
+              } @else if (isCatalogLoading()) {
+                <p>Carregando estabelecimentos...</p>
+              } @else if (establishments().length === 0) {
+                <p>Nenhuma loja cadastrada para esta conta.</p>
+              } @else {
+                <div class="selection-list">
+                  @for (establishment of establishments(); track establishment.id) {
+                    <button
+                      type="button"
+                      class="selection-item"
+                      [class.active]="establishment.id === selectedEstablishmentId()"
+                      (click)="selectEstablishment(establishment.id)"
+                    >
+                      <strong>{{ establishment.tradeName }}</strong>
+                      <span>{{ establishment.address.city }}/{{ establishment.address.state }}</span>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+
+            <div>
+              <p class="label section-gap">Cardapio da loja</p>
+
+              @if (selectedEstablishment(); as establishment) {
+                <h2>{{ establishment.tradeName }}</h2>
+                <p>{{ establishment.openingHours }}</p>
+
+                @if (isProductsLoading()) {
+                  <p>Atualizando produtos...</p>
+                } @else if (products().length === 0) {
+                  <p>Esta loja ainda nao tem itens publicados.</p>
+                } @else {
+                  <div class="product-preview-list">
+                    @for (product of products(); track product.id) {
+                      <article class="product-preview">
+                        <div>
+                          <p class="label inner">{{ productCategoryName(product.category) }}</p>
+                          <strong>{{ product.name }}</strong>
+                        </div>
+                        <span>{{ formatPrice(product.price) }}</span>
+                      </article>
+                    }
+                  </div>
+                }
+              } @else {
+                <h2>Selecione uma loja</h2>
+                <p>Escolha um estabelecimento para visualizar os produtos publicados.</p>
+              }
+            </div>
+
+            <a routerLink="/cliente" class="secondary-link">Abrir area do cliente</a>
+          </aside>
+        </section>
+      }
     </main>
   `,
   styles: `
@@ -398,7 +429,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
     .hero-card {
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+      grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.8fr);
       gap: 20px;
       background: linear-gradient(135deg, rgba(213, 239, 226, 0.96), rgba(249, 253, 250, 0.92));
     }
@@ -436,16 +467,6 @@ type ProductFormField = keyof typeof initialProductFormValue;
       line-height: 1.6;
     }
 
-    ul,
-    ol {
-      margin: 0;
-      padding-left: 20px;
-      display: grid;
-      gap: 10px;
-      color: #3f5144;
-      line-height: 1.6;
-    }
-
     .mini-board {
       display: grid;
       gap: 10px;
@@ -461,11 +482,13 @@ type ProductFormField = keyof typeof initialProductFormValue;
       background: rgba(255, 255, 255, 0.72);
       color: #173126;
       font-weight: 700;
+      text-align: center;
+      padding: 0 14px;
     }
 
     .layout-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
       gap: 20px;
       align-items: start;
     }
@@ -474,11 +497,6 @@ type ProductFormField = keyof typeof initialProductFormValue;
       padding: 14px 18px;
       border-radius: 18px;
       font-weight: 600;
-    }
-
-    .form-stack {
-      display: grid;
-      gap: 20px;
     }
 
     .success {
@@ -493,13 +511,21 @@ type ProductFormField = keyof typeof initialProductFormValue;
       border: 1px solid rgba(161, 49, 49, 0.18);
     }
 
+    .access {
+      background: rgba(24, 68, 102, 0.1);
+      color: #144466;
+      border: 1px solid rgba(24, 68, 102, 0.18);
+    }
+
+    .form-stack,
     .form-panel,
     .side-panel {
       display: grid;
       gap: 20px;
     }
 
-    .section-heading {
+    .section-heading,
+    .side-header {
       display: flex;
       justify-content: space-between;
       gap: 12px;
@@ -513,6 +539,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
     .chip,
     .secondary-link,
+    .secondary-button,
     .submit-button {
       display: inline-flex;
       align-items: center;
@@ -522,6 +549,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
       padding: 0 18px;
       font-weight: 700;
       text-decoration: none;
+      font: inherit;
     }
 
     .chip {
@@ -534,6 +562,14 @@ type ProductFormField = keyof typeof initialProductFormValue;
     .chip.alt {
       background: rgba(125, 79, 47, 0.1);
       color: #7d4f2f;
+    }
+
+    .secondary-link,
+    .secondary-button {
+      border: none;
+      background: rgba(23, 49, 38, 0.08);
+      color: #173126;
+      cursor: pointer;
     }
 
     .form-grid {
@@ -586,7 +622,8 @@ type ProductFormField = keyof typeof initialProductFormValue;
       cursor: pointer;
     }
 
-    .submit-button[disabled] {
+    .submit-button[disabled],
+    .secondary-button[disabled] {
       opacity: 0.7;
       cursor: progress;
     }
@@ -608,6 +645,10 @@ type ProductFormField = keyof typeof initialProductFormValue;
       border-radius: 18px;
       background: rgba(125, 79, 47, 0.08);
       color: #6b4630;
+    }
+
+    .session-email {
+      font-weight: 600;
     }
 
     .selection-list,
@@ -657,14 +698,14 @@ type ProductFormField = keyof typeof initialProductFormValue;
       font-weight: 600;
     }
 
-    .secondary-link {
-      width: fit-content;
-      background: rgba(23, 49, 38, 0.08);
-      color: #173126;
+    .section-gap {
+      margin-bottom: 12px;
     }
 
-    .roadmap-label {
-      margin-top: 8px;
+    .blocked-panel {
+      display: grid;
+      gap: 16px;
+      max-width: 760px;
     }
 
     @media (max-width: 900px) {
@@ -674,7 +715,8 @@ type ProductFormField = keyof typeof initialProductFormValue;
         grid-template-columns: 1fr;
       }
 
-      .section-heading {
+      .section-heading,
+      .side-header {
         align-items: flex-start;
         flex-direction: column;
       }
@@ -683,24 +725,29 @@ type ProductFormField = keyof typeof initialProductFormValue;
 })
 export class MerchantHomePage {
   private readonly formBuilder = inject(FormBuilder);
+  private readonly currentAccountApi = inject(CurrentAccountApi);
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly productApi = inject(ProductApi);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly categories = establishmentCategoryOptions;
   readonly productCategories = productCategoryOptions;
+  readonly isWorkspaceLoading = signal(true);
   readonly isSubmittingEstablishment = signal(false);
   readonly isSubmittingProduct = signal(false);
-  readonly isCatalogLoading = signal(true);
+  readonly isCatalogLoading = signal(false);
   readonly isProductsLoading = signal(false);
   readonly establishmentSuccessMessage = signal('');
   readonly establishmentErrorMessage = signal('');
   readonly productSuccessMessage = signal('');
   readonly productErrorMessage = signal('');
   readonly catalogErrorMessage = signal('');
+  readonly accessMessage = signal('');
+  readonly currentAccount = signal<CurrentAccount | null>(null);
   readonly establishments = signal<Establishment[]>([]);
   readonly selectedEstablishmentId = signal<string | null>(null);
   readonly products = signal<Product[]>([]);
+  readonly canManageCatalog = computed(() => this.currentAccount()?.profile === 'MERCHANT');
   readonly selectedEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.selectedEstablishmentId()) ?? null
   );
@@ -732,10 +779,19 @@ export class MerchantHomePage {
   });
 
   constructor() {
-    this.loadEstablishments();
+    this.loadWorkspace();
+  }
+
+  reloadWorkspace() {
+    this.loadWorkspace(this.selectedEstablishmentId() ?? undefined);
   }
 
   submitEstablishment() {
+    if (!this.canManageCatalog()) {
+      this.establishmentErrorMessage.set('Entre com uma conta de lojista para cadastrar estabelecimentos.');
+      return;
+    }
+
     if (this.establishmentForm.invalid) {
       this.establishmentForm.markAllAsTouched();
       return;
@@ -768,6 +824,11 @@ export class MerchantHomePage {
   }
 
   submitProduct() {
+    if (!this.canManageCatalog()) {
+      this.productErrorMessage.set('Entre com uma conta de lojista para publicar produtos.');
+      return;
+    }
+
     if (this.productForm.invalid) {
       this.productForm.markAllAsTouched();
       return;
@@ -828,11 +889,49 @@ export class MerchantHomePage {
     return brlFormatter.format(price);
   }
 
+  private loadWorkspace(preferredEstablishmentId?: string) {
+    this.isWorkspaceLoading.set(true);
+    this.accessMessage.set('');
+    this.catalogErrorMessage.set('');
+
+    this.currentAccountApi
+      .getCurrent()
+      .pipe(
+        finalize(() => this.isWorkspaceLoading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (account) => {
+          this.currentAccount.set(account);
+
+          if (account.profile !== 'MERCHANT') {
+            this.establishments.set([]);
+            this.selectedEstablishmentId.set(null);
+            this.products.set([]);
+            this.accessMessage.set('Sua sessao atual nao possui perfil de lojista.');
+            return;
+          }
+
+          this.loadEstablishments(preferredEstablishmentId);
+        },
+        error: (error: unknown) => {
+          this.currentAccount.set(null);
+          this.establishments.set([]);
+          this.selectedEstablishmentId.set(null);
+          this.products.set([]);
+          this.accessMessage.set(
+            readApiErrorMessage(error, 'Sessao de lojista necessaria para gerenciar estabelecimentos e produtos.')
+          );
+        }
+      });
+  }
+
   private loadEstablishments(preferredEstablishmentId?: string) {
     this.isCatalogLoading.set(true);
+    this.catalogErrorMessage.set('');
 
     this.establishmentApi
-      .listPublic()
+      .listMine()
       .pipe(
         finalize(() => this.isCatalogLoading.set(false)),
         takeUntilDestroyed(this.destroyRef)
@@ -842,8 +941,9 @@ export class MerchantHomePage {
           this.establishments.set(establishments);
           this.syncSelection(establishments, preferredEstablishmentId);
         },
-        error: () => {
-          this.catalogErrorMessage.set('Nao foi possivel carregar os estabelecimentos cadastrados.');
+        error: (error: unknown) => {
+          const message = readApiErrorMessage(error, 'Nao foi possivel carregar os estabelecimentos da conta.');
+          this.catalogErrorMessage.set(message);
           this.establishments.set([]);
           this.selectedEstablishmentId.set(null);
           this.products.set([]);

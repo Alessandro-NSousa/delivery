@@ -17,35 +17,32 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
   imports: [RouterLink],
   template: `
     <main class="page-shell">
-      <a routerLink="/" class="back-link">Voltar ao hub</a>
+      <a routerLink="/" class="back-link">Voltar ao inicio</a>
 
       <header class="hero-card">
-        <p class="eyebrow">Cliente</p>
-        <h1>Escolha um estabelecimento e comece o pedido.</h1>
-        <p>
-          Esta primeira versao do MVP ja lista os estabelecimentos cadastrados no backend em tempo real.
-        </p>
+        <div>
+          <p class="eyebrow">Catalogo publico</p>
+          <h1>Escolha uma loja e confira o cardapio.</h1>
+          <p>Os dados desta tela vem da API publica de estabelecimentos e produtos.</p>
+        </div>
+
+        <div class="hero-metrics">
+          <article class="metric-card">
+            <span>Lojas</span>
+            <strong>{{ establishments().length }}</strong>
+          </article>
+
+          <article class="metric-card">
+            <span>Itens da loja</span>
+            <strong>{{ products().length }}</strong>
+          </article>
+
+          <article class="metric-card">
+            <span>Disponiveis</span>
+            <strong>{{ availableProductsCount() }}</strong>
+          </article>
+        </div>
       </header>
-
-      <section class="status-row">
-        <article class="panel warm compact">
-          <p class="label">Agora</p>
-          <h2>{{ establishments().length }} estabelecimentos</h2>
-          <p>Catalogo publico inicial disponivel para o cliente explorar.</p>
-        </article>
-
-        <article class="panel light compact">
-          <p class="label">Catalogo</p>
-          <h2>{{ products().length }} produtos</h2>
-          <p>O cliente ja consegue trocar de loja e visualizar o cardapio publicado.</p>
-        </article>
-
-        <article class="panel dark compact">
-          <p class="label">Operacao</p>
-          <h2>Dados vindos da API</h2>
-          <p>Sem mocks: a pagina consulta o backend e reage a falhas e recargas.</p>
-        </article>
-      </section>
 
       <section class="list-header">
         <div>
@@ -71,8 +68,8 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
         <section class="panel empty-state">
           <p class="label">Sem resultados</p>
           <h2>Nenhum estabelecimento foi cadastrado ainda.</h2>
-          <p>Use a area do estabelecimento para criar o primeiro cadastro e volte aqui para conferir.</p>
-          <a routerLink="/estabelecimento" class="primary-link">Cadastrar estabelecimento</a>
+          <p>Use o painel do lojista para cadastrar a primeira loja e volte aqui para conferir.</p>
+          <a routerLink="/estabelecimento" class="primary-link">Abrir painel do lojista</a>
         </section>
       } @else {
         <section class="grid cards-grid">
@@ -147,7 +144,7 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
               <section class="panel empty-state">
                 <p class="label">Cardapio vazio</p>
                 <h2>Esta loja ainda nao publicou produtos.</h2>
-                <p>Volte mais tarde ou escolha outro estabelecimento para continuar explorando.</p>
+                <p>Escolha outra loja ou volte mais tarde para continuar explorando.</p>
               </section>
             } @else {
               <section class="grid product-grid">
@@ -209,7 +206,39 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
     }
 
     .hero-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.75fr);
+      gap: 20px;
       background: linear-gradient(135deg, rgba(255, 225, 192, 0.96), rgba(255, 248, 239, 0.9));
+    }
+
+    .hero-metrics {
+      display: grid;
+      gap: 12px;
+    }
+
+    .metric-card {
+      display: grid;
+      gap: 6px;
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .metric-card span {
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.72rem;
+      color: #7d4f2f;
+      font-weight: 700;
+    }
+
+    .metric-card strong {
+      font-size: 2rem;
+      line-height: 1;
+      color: #173126;
+      font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
     }
 
     .eyebrow,
@@ -245,10 +274,8 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       line-height: 1.6;
     }
 
-    .status-row,
     .grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 18px;
     }
 
@@ -443,25 +470,8 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       }
     }
 
-    .warm {
-      background: linear-gradient(180deg, rgba(255, 241, 216, 0.96), rgba(255, 251, 246, 0.92));
-    }
-
-    .light {
-      background: linear-gradient(180deg, rgba(252, 246, 234, 0.96), rgba(255, 253, 249, 0.92));
-    }
-
-    .dark {
-      background: linear-gradient(180deg, rgba(22, 60, 45, 0.97), rgba(29, 77, 57, 0.93));
-    }
-
-    .dark h2,
-    .dark p,
-    .dark .label {
-      color: #f7f1e6;
-    }
-
     @media (max-width: 900px) {
+      .hero-card,
       .list-header,
       .card-head,
       .catalog-header,
@@ -491,6 +501,7 @@ export class CustomerHomePage {
   readonly products = signal<Product[]>([]);
   readonly areProductsLoading = signal(false);
   readonly productErrorMessage = signal('');
+  readonly availableProductsCount = computed(() => this.products().filter((product) => product.available).length);
   readonly selectedEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.selectedEstablishmentId()) ?? null
   );

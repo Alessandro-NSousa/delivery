@@ -11,6 +11,10 @@ export class EstablishmentApi {
     return this.http.get<Establishment[]>('/api/public/establishments');
   }
 
+  listMine() {
+    return this.http.get<Establishment[]>('/api/me/establishments');
+  }
+
   create(request: CreateEstablishmentRequest) {
     return this.http.post<Establishment>('/api/establishments', request);
   }
