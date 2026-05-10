@@ -2,6 +2,11 @@ package com.delivery.establishment.application;
 
 import java.util.List;
 
+import org.springframework.stereotype.Service;
+import org.springframework.validation.annotation.Validated;
+
+import com.delivery.account.application.CurrentAccountService;
+import com.delivery.account.domain.Account;
 import com.delivery.establishment.api.AddressRequest;
 import com.delivery.establishment.api.CreateEstablishmentRequest;
 import com.delivery.establishment.api.EstablishmentResponse;
@@ -9,27 +14,34 @@ import com.delivery.establishment.domain.Address;
 import com.delivery.establishment.domain.Establishment;
 import com.delivery.establishment.infrastructure.EstablishmentRepository;
 import com.delivery.shared.domain.BusinessException;
+
 import jakarta.transaction.Transactional;
-import org.springframework.stereotype.Service;
-import org.springframework.validation.annotation.Validated;
 
 @Service
 @Validated
 public class EstablishmentService {
 
     private final EstablishmentRepository establishmentRepository;
+    private final CurrentAccountService currentAccountService;
 
-    public EstablishmentService(EstablishmentRepository establishmentRepository) {
+    public EstablishmentService(
+        EstablishmentRepository establishmentRepository,
+        CurrentAccountService currentAccountService
+    ) {
         this.establishmentRepository = establishmentRepository;
+        this.currentAccountService = currentAccountService;
     }
 
     @Transactional
     public EstablishmentResponse create(CreateEstablishmentRequest request) {
+        Account owner = currentAccountService.requireMerchant();
+
         if (establishmentRepository.existsByCnpj(request.cnpj())) {
             throw new BusinessException("Ja existe um estabelecimento cadastrado com este CNPJ");
         }
 
         Establishment establishment = new Establishment(
+            owner,
             request.tradeName(),
             request.corporateName(),
             request.cnpj(),
@@ -46,6 +58,14 @@ public class EstablishmentService {
     @Transactional
     public List<EstablishmentResponse> listAll() {
         return establishmentRepository.findAll().stream().map(EstablishmentResponse::from).toList();
+    }
+
+    @Transactional
+    public List<EstablishmentResponse> listMine() {
+        Account currentAccount = currentAccountService.requireMerchant();
+        return establishmentRepository.findAllByOwnerIdOrderByTradeNameAsc(currentAccount.getId()).stream()
+            .map(EstablishmentResponse::from)
+            .toList();
     }
 
     private Address toAddress(AddressRequest request) {

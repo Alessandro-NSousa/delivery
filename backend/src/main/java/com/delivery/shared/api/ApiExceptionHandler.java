@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -48,6 +49,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     ResponseEntity<ProblemDetail> handleBusiness(BusinessException ex) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
             .body(createProblemDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage()));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(createProblemDetail(HttpStatus.FORBIDDEN, ex.getMessage()));
     }
 
     @ExceptionHandler(ConstraintViolationException.class)

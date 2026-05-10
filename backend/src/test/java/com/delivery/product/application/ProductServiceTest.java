@@ -16,7 +16,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
+import com.delivery.account.application.CurrentAccountService;
+import com.delivery.account.domain.Account;
+import com.delivery.account.domain.AccountProfile;
 import com.delivery.establishment.domain.Address;
 import com.delivery.establishment.domain.Establishment;
 import com.delivery.establishment.domain.EstablishmentCategory;
@@ -37,12 +41,16 @@ class ProductServiceTest {
     @Mock
     private EstablishmentRepository establishmentRepository;
 
+    @Mock
+    private CurrentAccountService currentAccountService;
+
     @InjectMocks
     private ProductService productService;
 
     @Test
     void shouldRejectProductCreationWhenEstablishmentDoesNotExist() {
         UUID establishmentId = UUID.randomUUID();
+        when(currentAccountService.requireMerchant()).thenReturn(sampleMerchant());
         when(establishmentRepository.findById(establishmentId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> productService.create(establishmentId, sampleRequest()))
@@ -51,9 +59,23 @@ class ProductServiceTest {
     }
 
     @Test
+    void shouldRejectProductCreationForAnotherMerchant() {
+        Account currentMerchant = sampleMerchant();
+        Establishment establishment = sampleEstablishment(sampleOtherMerchant());
+        when(currentAccountService.requireMerchant()).thenReturn(currentMerchant);
+        when(establishmentRepository.findById(establishment.getId())).thenReturn(Optional.of(establishment));
+
+        assertThatThrownBy(() -> productService.create(establishment.getId(), sampleRequest()))
+            .isInstanceOf(AccessDeniedException.class)
+            .hasMessageContaining("outra loja");
+    }
+
+    @Test
     void shouldPersistProductForExistingEstablishment() {
-        Establishment establishment = sampleEstablishment();
+        Account merchant = sampleMerchant();
+        Establishment establishment = sampleEstablishment(merchant);
         CreateProductRequest request = sampleRequest();
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
         when(establishmentRepository.findById(establishment.getId())).thenReturn(Optional.of(establishment));
         when(productRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -66,7 +88,7 @@ class ProductServiceTest {
 
     @Test
     void shouldListProductsByEstablishment() {
-        Establishment establishment = sampleEstablishment();
+        Establishment establishment = sampleEstablishment(sampleMerchant());
         when(establishmentRepository.existsById(establishment.getId())).thenReturn(true);
         when(productRepository.findAllByEstablishmentIdOrderByNameAsc(establishment.getId()))
             .thenReturn(List.of(new Product(
@@ -96,8 +118,9 @@ class ProductServiceTest {
         );
     }
 
-    private Establishment sampleEstablishment() {
+    private Establishment sampleEstablishment(Account owner) {
         return new Establishment(
+            owner,
             "Lanche Bom",
             "Lanche Bom LTDA",
             "12345678000190",
@@ -107,5 +130,13 @@ class ProductServiceTest {
             "Seg-Dom 18:00-23:30",
             new Address("01001000", "Rua A", "10", "Centro", "Sao Paulo", "SP", "Loja 1")
         );
+    }
+
+    private Account sampleMerchant() {
+        return new Account("auth0|merchant-1", "merchant@example.com", "Merchant Example", AccountProfile.MERCHANT);
+    }
+
+    private Account sampleOtherMerchant() {
+        return new Account("auth0|merchant-2", "other@example.com", "Other Merchant", AccountProfile.MERCHANT);
     }
 }
