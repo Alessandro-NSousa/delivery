@@ -4,7 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
-import { CurrentAccountApi } from '../account/current-account-api';
+import { AuthSessionService } from '../account/auth-session.service';
 import { CurrentAccount } from '../account/current-account.models';
 import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
@@ -103,7 +103,20 @@ type ProductFormField = keyof typeof initialProductFormValue;
             O backend exige autenticacao com perfil MERCHANT para listar suas lojas, cadastrar estabelecimentos e
             publicar produtos.
           </p>
-          <a routerLink="/cliente" class="secondary-link">Abrir area do cliente</a>
+
+          <div class="blocked-actions">
+            @if (currentAccount()) {
+              <button type="button" class="primary-link" (click)="logout()" [disabled]="isSessionBusy()">
+                Encerrar sessao atual
+              </button>
+            } @else {
+              <button type="button" class="primary-link" (click)="loginAsMerchant()" [disabled]="isSessionBusy()">
+                Entrar como lojista
+              </button>
+            }
+
+            <a routerLink="/cliente" class="secondary-link">Abrir area do cliente</a>
+          </div>
         </section>
       } @else {
         <section class="layout-grid">
@@ -537,7 +550,14 @@ type ProductFormField = keyof typeof initialProductFormValue;
       border-top: 1px solid rgba(23, 49, 38, 0.08);
     }
 
+    .blocked-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
     .chip,
+    .primary-link,
     .secondary-link,
     .secondary-button,
     .submit-button {
@@ -562,6 +582,13 @@ type ProductFormField = keyof typeof initialProductFormValue;
     .chip.alt {
       background: rgba(125, 79, 47, 0.1);
       color: #7d4f2f;
+    }
+
+    .primary-link {
+      border: none;
+      background: #173126;
+      color: #f7f1e6;
+      cursor: pointer;
     }
 
     .secondary-link,
@@ -725,7 +752,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
 })
 export class MerchantHomePage {
   private readonly formBuilder = inject(FormBuilder);
-  private readonly currentAccountApi = inject(CurrentAccountApi);
+  private readonly authSession = inject(AuthSessionService);
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly productApi = inject(ProductApi);
   private readonly destroyRef = inject(DestroyRef);
@@ -743,7 +770,8 @@ export class MerchantHomePage {
   readonly productErrorMessage = signal('');
   readonly catalogErrorMessage = signal('');
   readonly accessMessage = signal('');
-  readonly currentAccount = signal<CurrentAccount | null>(null);
+  readonly currentAccount = this.authSession.currentAccount;
+  readonly isSessionBusy = this.authSession.isLoading;
   readonly establishments = signal<Establishment[]>([]);
   readonly selectedEstablishmentId = signal<string | null>(null);
   readonly products = signal<Product[]>([]);
@@ -784,6 +812,14 @@ export class MerchantHomePage {
 
   reloadWorkspace() {
     this.loadWorkspace(this.selectedEstablishmentId() ?? undefined);
+  }
+
+  loginAsMerchant() {
+    this.authSession.loginAs('MERCHANT', '/estabelecimento');
+  }
+
+  logout() {
+    void this.authSession.logout();
   }
 
   submitEstablishment() {
@@ -894,15 +930,24 @@ export class MerchantHomePage {
     this.accessMessage.set('');
     this.catalogErrorMessage.set('');
 
-    this.currentAccountApi
-      .getCurrent()
+    this.authSession
+      .refresh()
       .pipe(
         finalize(() => this.isWorkspaceLoading.set(false)),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe({
         next: (account) => {
-          this.currentAccount.set(account);
+          if (!account) {
+            this.establishments.set([]);
+            this.selectedEstablishmentId.set(null);
+            this.products.set([]);
+            this.accessMessage.set(
+              this.authSession.feedbackMessage() ||
+                'Sessao de lojista necessaria para gerenciar estabelecimentos e produtos.'
+            );
+            return;
+          }
 
           if (account.profile !== 'MERCHANT') {
             this.establishments.set([]);
@@ -913,15 +958,6 @@ export class MerchantHomePage {
           }
 
           this.loadEstablishments(preferredEstablishmentId);
-        },
-        error: (error: unknown) => {
-          this.currentAccount.set(null);
-          this.establishments.set([]);
-          this.selectedEstablishmentId.set(null);
-          this.products.set([]);
-          this.accessMessage.set(
-            readApiErrorMessage(error, 'Sessao de lojista necessaria para gerenciar estabelecimentos e produtos.')
-          );
         }
       });
   }

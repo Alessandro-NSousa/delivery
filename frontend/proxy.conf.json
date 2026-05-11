@@ -3,6 +3,28 @@
     "target": "http://localhost:8080",
     "secure": false,
     "changeOrigin": true,
+    "xfwd": true,
+    "logLevel": "warn"
+  },
+  "/oauth2": {
+    "target": "http://localhost:8080",
+    "secure": false,
+    "changeOrigin": true,
+    "xfwd": true,
+    "logLevel": "warn"
+  },
+  "/login": {
+    "target": "http://localhost:8080",
+    "secure": false,
+    "changeOrigin": true,
+    "xfwd": true,
+    "logLevel": "warn"
+  },
+  "/logout": {
+    "target": "http://localhost:8080",
+    "secure": false,
+    "changeOrigin": true,
+    "xfwd": true,
     "logLevel": "warn"
   }
 }

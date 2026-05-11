@@ -2,6 +2,7 @@ import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 
+import { AuthSessionService } from '../account/auth-session.service';
 import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
 import { Establishment, establishmentCategoryOptions } from '../establishments/establishment.models';
@@ -21,17 +22,47 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
         <div>
           <p class="eyebrow">MVP funcional</p>
           <h1>Central de operacao para testar o delivery.</h1>
-          <p class="summary">A tela inicial agora mostra dados reais da API e leva direto para os fluxos principais.</p>
+          <p class="summary">
+            A tela inicial mostra dados reais da API, deixa a entrada explicita como cliente ou lojista e centraliza o
+            estado atual da sessao.
+          </p>
         </div>
 
         <div class="actions-card">
-          <a routerLink="/cliente" class="primary-action">Abrir catalogo do cliente</a>
-          <a routerLink="/estabelecimento" class="secondary-action">Abrir painel do lojista</a>
+          @if (currentAccount(); as account) {
+            <p class="auth-label">Sessao ativa</p>
+            <strong class="auth-title">{{ account.displayName }}</strong>
+            <span class="auth-copy">{{ account.email }}</span>
+            <span class="auth-badge">
+              {{ account.profile === 'MERCHANT' ? 'Perfil lojista ativo' : 'Perfil cliente ativo' }}
+            </span>
+            <a [routerLink]="currentAreaLink()" class="primary-action">Abrir minha area</a>
+            <button type="button" class="secondary-action" (click)="logout()" [disabled]="isSessionBusy()">
+              Encerrar sessao
+            </button>
+          } @else {
+            <p class="auth-label">Entrada explicita</p>
+            <strong class="auth-title">Escolha como quer entrar.</strong>
+            <span class="auth-copy">O backend continua definindo o perfil real da sessao apos o login.</span>
+            <button type="button" class="primary-action" (click)="loginAsCustomer()" [disabled]="isSessionBusy()">
+              Entrar como cliente
+            </button>
+            <button type="button" class="secondary-action" (click)="loginAsMerchant()" [disabled]="isSessionBusy()">
+              Entrar como lojista
+            </button>
+          }
+
           <button type="button" class="ghost-action" (click)="reload()" [disabled]="isLoading()">
             {{ isLoading() ? 'Atualizando dados...' : 'Atualizar dados' }}
           </button>
         </div>
       </header>
+
+      @if (sessionFeedbackMessage()) {
+        <section class="feedback" [class.error]="sessionFeedbackKind() === 'error'" [class.info]="sessionFeedbackKind() !== 'error'">
+          {{ sessionFeedbackMessage() }}
+        </section>
+      }
 
       @if (errorMessage()) {
         <section class="feedback error">{{ errorMessage() }}</section>
@@ -224,6 +255,45 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       font-size: 1.08rem;
     }
 
+    .auth-label,
+    .auth-title,
+    .auth-copy,
+    .auth-badge {
+      color: #f7f1e6;
+    }
+
+    .auth-label {
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 0.78rem;
+      font-weight: 700;
+      opacity: 0.8;
+    }
+
+    .auth-title {
+      font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+      font-size: 1.8rem;
+      line-height: 1;
+    }
+
+    .auth-copy {
+      line-height: 1.5;
+    }
+
+    .auth-badge {
+      display: inline-flex;
+      width: fit-content;
+      min-height: 34px;
+      align-items: center;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      font-size: 0.84rem;
+      font-weight: 700;
+    }
+
     .panel,
     .actions-card {
       border-radius: 28px;
@@ -326,6 +396,12 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       background: rgba(161, 49, 49, 0.1);
       color: #7a1f1f;
       border: 1px solid rgba(161, 49, 49, 0.18);
+    }
+
+    .info {
+      background: rgba(22, 60, 45, 0.08);
+      color: #173126;
+      border: 1px solid rgba(22, 60, 45, 0.14);
     }
 
     .section-head,
@@ -458,10 +534,15 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
   `
 })
 export class HomePage {
+  private readonly authSession = inject(AuthSessionService);
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly productApi = inject(ProductApi);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly currentAccount = this.authSession.currentAccount;
+  readonly isSessionBusy = this.authSession.isLoading;
+  readonly sessionFeedbackMessage = this.authSession.feedbackMessage;
+  readonly sessionFeedbackKind = this.authSession.feedbackKind;
   readonly establishments = signal<Establishment[]>([]);
   readonly selectedEstablishmentId = signal<string | null>(null);
   readonly products = signal<Product[]>([]);
@@ -481,9 +562,22 @@ export class HomePage {
 
     return `${establishment.address.city}/${establishment.address.state}`;
   });
+  readonly currentAreaLink = computed(() => this.authSession.currentArea());
 
   constructor() {
     this.loadEstablishments();
+  }
+
+  loginAsCustomer() {
+    this.authSession.loginAs('CUSTOMER');
+  }
+
+  loginAsMerchant() {
+    this.authSession.loginAs('MERCHANT');
+  }
+
+  logout() {
+    void this.authSession.logout();
   }
 
   reload() {
@@ -533,7 +627,9 @@ export class HomePage {
           this.isLoading.set(false);
         },
         error: (error: unknown) => {
-          this.errorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar os estabelecimentos agora.'));
+          this.errorMessage.set(
+            readApiErrorMessage(error, 'Nao foi possivel carregar os dados publicos agora. Confirme se o backend local esta ativo.')
+          );
           this.establishments.set([]);
           this.selectedEstablishmentId.set(null);
           this.products.set([]);
@@ -555,7 +651,9 @@ export class HomePage {
           this.areProductsLoading.set(false);
         },
         error: (error: unknown) => {
-          this.productErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar o cardapio agora.'));
+          this.productErrorMessage.set(
+            readApiErrorMessage(error, 'Nao foi possivel carregar o cardapio desta loja agora.')
+          );
           this.products.set([]);
           this.areProductsLoading.set(false);
         }
