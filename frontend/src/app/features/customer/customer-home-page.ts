@@ -1,20 +1,28 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { finalize } from 'rxjs';
 
+import { AuthSessionService } from '../account/auth-session.service';
+import { CustomerCartService } from './customer-cart.service';
 import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
 import { Establishment, establishmentCategoryOptions } from '../establishments/establishment.models';
+import { OrderApi } from '../orders/order-api';
+import { Order, OrderPaymentMethod, paymentMethodOptions } from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { Product, productCategoryOptions } from '../products/product.models';
 
 const establishmentCategoryLabels = new Map(establishmentCategoryOptions.map((option) => [option.value, option.label]));
 const productCategoryLabels = new Map(productCategoryOptions.map((option) => [option.value, option.label]));
+const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 @Component({
   selector: 'app-customer-home-page',
-  imports: [RouterLink],
+  imports: [ReactiveFormsModule, RouterLink],
   template: `
     <main class="page-shell">
       <a routerLink="/" class="back-link">Voltar ao inicio</a>
@@ -164,12 +172,209 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
                       </div>
 
                       <p>{{ product.description }}</p>
-                      <strong class="price">{{ formatPrice(product.price) }}</strong>
+
+                      <div class="product-footer">
+                        <strong class="price">{{ formatPrice(product.price) }}</strong>
+                        <button
+                          type="button"
+                          class="secondary-button add-button"
+                          (click)="addToCart(product)"
+                          [disabled]="!product.available || isSubmittingOrder()"
+                        >
+                          {{ product.available ? 'Adicionar a sacola' : 'Indisponivel' }}
+                        </button>
+                      </div>
                     </div>
                   </article>
                 }
               </section>
             }
+
+            <section class="panel cart-panel">
+              <div class="catalog-header">
+                <div>
+                  <p class="label">Checkout minimo</p>
+                  <h2>Sacola</h2>
+                  @if (cartEstablishment(); as cartEstablishment) {
+                    <p>Itens atuais vinculados a {{ cartEstablishment.tradeName }}.</p>
+                  } @else {
+                    <p>Adicione produtos de uma unica loja para montar e enviar o pedido.</p>
+                  }
+                </div>
+
+                @if (currentAccount()) {
+                  <span class="city-chip">{{ currentAccount()?.profile === 'CUSTOMER' ? 'Sessao CUSTOMER ativa' : 'Sessao MERCHANT ativa' }}</span>
+                }
+              </div>
+
+              @if (cartFeedbackMessage()) {
+                <section
+                  class="feedback"
+                  [class.error]="cartFeedbackKind() === 'error'"
+                  [class.success]="cartFeedbackKind() === 'success'"
+                  [class.info]="cartFeedbackKind() === 'info'"
+                >
+                  {{ cartFeedbackMessage() }}
+                </section>
+              }
+
+              @if (checkoutErrorMessage()) {
+                <section class="feedback error">{{ checkoutErrorMessage() }}</section>
+              }
+
+              @if (checkoutSuccessMessage()) {
+                <section class="feedback success">{{ checkoutSuccessMessage() }}</section>
+              }
+
+              @if (lastOrder(); as order) {
+                <article class="order-confirmation">
+                  <div>
+                    <p class="label">Ultimo pedido enviado</p>
+                    <h3>#{{ shortOrderId(order.id) }}</h3>
+                    <p>{{ paymentMethodLabel(order.paymentMethod) }} · {{ formatPrice(order.totalAmount) }}</p>
+                  </div>
+                  <span class="city-chip">{{ orderStatusLabel(order.status) }}</span>
+                </article>
+              }
+
+              @if (cartItems().length === 0) {
+                <section class="empty-state compact">
+                  <p class="label">Sacola vazia</p>
+                  <h3>Escolha itens do cardapio para iniciar o checkout.</h3>
+                  <p>
+                    O backend agora recebe pedidos reais, mas o subtotal continua sendo recalculado na hora da confirmacao.
+                  </p>
+                </section>
+              } @else {
+                @if (cartEstablishmentId() && cartEstablishmentId() !== selectedEstablishmentId()) {
+                  <section class="feedback info">
+                    Sua sacola continua vinculada a outra loja. Volte para ela antes de adicionar novos itens ou apenas finalize o pedido atual.
+                  </section>
+                }
+
+                @if (cartHasUnavailableItems()) {
+                  <section class="feedback error">
+                    A sacola possui itens indisponiveis ou fora do cardapio atual. Revise os itens antes de finalizar.
+                  </section>
+                }
+
+                <section class="cart-items">
+                  @for (item of cartItems(); track item.productId) {
+                    <article class="cart-item">
+                      <img class="cart-item-image" [src]="item.imageUrl" [alt]="item.name" loading="lazy" />
+
+                      <div class="item-copy">
+                        <div class="card-head compact-head">
+                          <div>
+                            <h3>{{ item.name }}</h3>
+                            <p>{{ formatPrice(item.price) }} por unidade</p>
+                          </div>
+                          <span class="city-chip availability" [class.unavailable]="!item.available">
+                            {{ item.available ? 'Disponivel' : 'Indisponivel' }}
+                          </span>
+                        </div>
+
+                        <div class="item-actions">
+                          <div class="quantity-stepper">
+                            <button
+                              type="button"
+                              class="quantity-button"
+                              (click)="updateCartItemQuantity(item.productId, item.quantity - 1)"
+                              [disabled]="isSubmittingOrder()"
+                            >
+                              -
+                            </button>
+                            <span>{{ item.quantity }}</span>
+                            <button
+                              type="button"
+                              class="quantity-button"
+                              (click)="updateCartItemQuantity(item.productId, item.quantity + 1)"
+                              [disabled]="isSubmittingOrder()"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <strong class="price">{{ formatPrice(item.price * item.quantity) }}</strong>
+
+                          <button
+                            type="button"
+                            class="text-button"
+                            (click)="removeCartItem(item.productId)"
+                            [disabled]="isSubmittingOrder()"
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  }
+                </section>
+
+                <div class="cart-toolbar">
+                  @if (cartEstablishmentId() && cartEstablishmentId() !== selectedEstablishmentId()) {
+                    <button type="button" class="secondary-button" (click)="focusCartEstablishment()">
+                      Voltar para a loja da sacola
+                    </button>
+                  }
+
+                  <button type="button" class="text-button" (click)="clearCart()" [disabled]="isSubmittingOrder()">
+                    Limpar sacola
+                  </button>
+                </div>
+
+                <form class="checkout-form" [formGroup]="checkoutForm" (ngSubmit)="submitOrder()">
+                  <label class="field">
+                    <span>Forma de pagamento</span>
+                    <select formControlName="paymentMethod">
+                      @for (option of paymentMethods; track option.value) {
+                        <option [value]="option.value">{{ option.label }}</option>
+                      }
+                    </select>
+                  </label>
+
+                  <label class="checkbox-row">
+                    <input type="checkbox" formControlName="changeRequired" [disabled]="!isCashPaymentSelected()" />
+                    <span>Precisa de troco na entrega</span>
+                  </label>
+
+                  @if (!isCashPaymentSelected()) {
+                    <p class="helper-text">Troco so fica disponivel quando o pagamento for na entrega.</p>
+                  }
+
+                  <div class="checkout-summary">
+                    <article>
+                      <span>Itens</span>
+                      <strong>{{ cartItemCount() }}</strong>
+                    </article>
+
+                    <article>
+                      <span>Subtotal</span>
+                      <strong>{{ formatPrice(cartSubtotal()) }}</strong>
+                    </article>
+                  </div>
+
+                  <div class="checkout-actions">
+                    @if (!currentAccount()) {
+                      <button type="button" class="primary-link" (click)="loginAsCustomer()" [disabled]="isSessionBusy()">
+                        Entrar como cliente
+                      </button>
+                      <p class="checkout-hint">A sacola fica preservada nesta aba enquanto o login acontece.</p>
+                    } @else if (!canCheckout()) {
+                      <button type="button" class="primary-link" (click)="logout()" [disabled]="isSessionBusy()">
+                        Encerrar sessao atual
+                      </button>
+                      <p class="checkout-hint">O checkout exige um perfil CUSTOMER para concluir o pedido.</p>
+                    } @else {
+                      <button type="submit" class="primary-link" [disabled]="isSubmittingOrder() || cartHasUnavailableItems()">
+                        {{ isSubmittingOrder() ? 'Enviando pedido...' : 'Finalizar pedido' }}
+                      </button>
+                      <p class="checkout-hint">O servidor recalcula preco e disponibilidade antes de confirmar.</p>
+                    }
+                  </div>
+                </form>
+              }
+            </section>
           </section>
         }
       }
@@ -450,6 +655,17 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       padding: 20px;
     }
 
+    .product-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .add-button {
+      min-width: 172px;
+    }
+
     .availability {
       background: rgba(29, 92, 70, 0.12);
     }
@@ -464,6 +680,178 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       color: #173126;
     }
 
+    .success {
+      background: rgba(29, 92, 70, 0.12);
+      color: #1d5c46;
+      border: 1px solid rgba(29, 92, 70, 0.18);
+    }
+
+    .info {
+      background: rgba(23, 49, 38, 0.08);
+      color: #173126;
+      border: 1px solid rgba(23, 49, 38, 0.12);
+    }
+
+    .cart-panel {
+      margin-top: 6px;
+    }
+
+    .order-confirmation {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .cart-items {
+      display: grid;
+      gap: 14px;
+    }
+
+    .cart-item {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 16px;
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .cart-item-image {
+      width: 112px;
+      height: 112px;
+      object-fit: cover;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(255, 225, 192, 0.96), rgba(255, 248, 239, 0.9));
+    }
+
+    .item-copy {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .compact-head {
+      align-items: flex-start;
+    }
+
+    .item-actions,
+    .cart-toolbar,
+    .checkout-actions,
+    .checkout-summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .quantity-stepper {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px;
+      border-radius: 999px;
+      background: rgba(23, 49, 38, 0.06);
+    }
+
+    .quantity-button {
+      width: 34px;
+      height: 34px;
+      border: none;
+      border-radius: 50%;
+      background: #173126;
+      color: #f7f1e6;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .quantity-button[disabled],
+    .primary-link[disabled],
+    .secondary-button[disabled],
+    .text-button[disabled],
+    select[disabled],
+    input[disabled] {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .text-button {
+      border: none;
+      background: transparent;
+      color: #7d4f2f;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .checkout-form {
+      display: grid;
+      gap: 16px;
+      padding: 20px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .field,
+    .checkbox-row {
+      display: grid;
+      gap: 8px;
+      color: #173126;
+      font-weight: 600;
+    }
+
+    .checkbox-row {
+      grid-template-columns: auto 1fr;
+      align-items: center;
+    }
+
+    select {
+      min-height: 46px;
+      border-radius: 14px;
+      border: 1px solid rgba(23, 49, 38, 0.12);
+      padding: 0 14px;
+      background: rgba(255, 251, 245, 0.96);
+      color: #173126;
+      font: inherit;
+    }
+
+    .helper-text,
+    .checkout-hint {
+      color: #5a6a61;
+      font-size: 0.95rem;
+    }
+
+    .checkout-summary article {
+      min-width: 160px;
+      display: grid;
+      gap: 6px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: rgba(255, 248, 239, 0.9);
+      border: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .checkout-summary span {
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.72rem;
+      color: #7d4f2f;
+      font-weight: 700;
+    }
+
+    .checkout-summary strong {
+      font-size: 1.35rem;
+      color: #173126;
+      font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+    }
+
     @keyframes shimmer {
       to {
         background-position-x: -200%;
@@ -475,9 +863,24 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       .list-header,
       .card-head,
       .catalog-header,
-      .card-actions {
+      .card-actions,
+      .product-footer,
+      .order-confirmation,
+      .item-actions,
+      .cart-toolbar,
+      .checkout-actions,
+      .checkout-summary {
         align-items: flex-start;
         flex-direction: column;
+      }
+
+      .cart-item {
+        grid-template-columns: 1fr;
+      }
+
+      .cart-item-image {
+        width: 100%;
+        height: 180px;
       }
 
       .cards-grid,
@@ -490,10 +893,17 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
   `
 })
 export class CustomerHomePage {
+  private readonly formBuilder = inject(FormBuilder);
+  private readonly authSession = inject(AuthSessionService);
+  private readonly cart = inject(CustomerCartService);
   private readonly establishmentApi = inject(EstablishmentApi);
+  private readonly orderApi = inject(OrderApi);
   private readonly productApi = inject(ProductApi);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly paymentMethods = paymentMethodOptions;
+  readonly currentAccount = this.authSession.currentAccount;
+  readonly isSessionBusy = this.authSession.isLoading;
   readonly establishments = signal<Establishment[]>([]);
   readonly selectedEstablishmentId = signal<string | null>(null);
   readonly isLoading = signal(true);
@@ -501,12 +911,38 @@ export class CustomerHomePage {
   readonly products = signal<Product[]>([]);
   readonly areProductsLoading = signal(false);
   readonly productErrorMessage = signal('');
+  readonly cartItems = this.cart.items;
+  readonly cartItemCount = this.cart.itemCount;
+  readonly cartSubtotal = this.cart.subtotal;
+  readonly cartHasUnavailableItems = this.cart.hasUnavailableItems;
+  readonly cartEstablishmentId = this.cart.establishmentId;
+  readonly cartFeedbackMessage = signal('');
+  readonly cartFeedbackKind = signal<'info' | 'error' | 'success'>('info');
+  readonly checkoutErrorMessage = signal('');
+  readonly checkoutSuccessMessage = signal('');
+  readonly isSubmittingOrder = signal(false);
+  readonly lastOrder = signal<Order | null>(null);
   readonly availableProductsCount = computed(() => this.products().filter((product) => product.available).length);
+  readonly canCheckout = computed(() => this.currentAccount()?.profile === 'CUSTOMER');
   readonly selectedEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.selectedEstablishmentId()) ?? null
   );
+  readonly cartEstablishment = computed(
+    () => this.establishments().find((establishment) => establishment.id === this.cartEstablishmentId()) ?? null
+  );
+
+  readonly checkoutForm = this.formBuilder.nonNullable.group({
+    paymentMethod: ['PIX' as OrderPaymentMethod],
+    changeRequired: [false]
+  });
 
   constructor() {
+    this.checkoutForm.controls.paymentMethod.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((paymentMethod) => {
+      if (paymentMethod !== 'CASH_ON_DELIVERY' && this.checkoutForm.controls.changeRequired.value) {
+        this.checkoutForm.controls.changeRequired.setValue(false);
+      }
+    });
+
     this.loadEstablishments();
   }
 
@@ -520,6 +956,150 @@ export class CustomerHomePage {
     if (establishmentId) {
       this.loadProducts(establishmentId);
     }
+  }
+
+  addToCart(product: Product) {
+    this.clearOrderFeedback();
+
+    const result = this.cart.addProduct(product);
+    if (result === 'added') {
+      this.setCartFeedback(`${product.name} adicionado a sacola.`, 'success');
+      return;
+    }
+
+    if (result === 'merged') {
+      this.setCartFeedback(`Quantidade de ${product.name} atualizada na sacola.`, 'success');
+      return;
+    }
+
+    if (result === 'unavailable') {
+      this.setCartFeedback('Itens indisponiveis nao podem ser adicionados a sacola.', 'error');
+      return;
+    }
+
+    const cartEstablishment = this.cartEstablishment();
+    this.setCartFeedback(
+      cartEstablishment
+        ? `Sua sacola ja esta vinculada a ${cartEstablishment.tradeName}. Limpe a sacola ou finalize o pedido atual.`
+        : 'Sua sacola ja contem itens de outra loja. Limpe a sacola ou finalize o pedido atual.',
+      'error'
+    );
+  }
+
+  updateCartItemQuantity(productId: string, quantity: number) {
+    this.clearOrderFeedback();
+    this.cart.setQuantity(productId, quantity);
+  }
+
+  removeCartItem(productId: string) {
+    this.clearOrderFeedback();
+    this.cart.removeItem(productId);
+    this.setCartFeedback('Item removido da sacola.', 'info');
+  }
+
+  clearCart() {
+    this.clearOrderFeedback();
+    this.cart.clear();
+    this.setCartFeedback('Sacola limpa.', 'info');
+  }
+
+  focusCartEstablishment() {
+    const establishmentId = this.cartEstablishmentId();
+
+    if (establishmentId) {
+      this.selectEstablishment(establishmentId);
+    }
+  }
+
+  loginAsCustomer() {
+    this.authSession.loginAs('CUSTOMER', '/cliente');
+  }
+
+  logout() {
+    void this.authSession.logout('/cliente');
+  }
+
+  isCashPaymentSelected() {
+    return this.checkoutForm.controls.paymentMethod.value === 'CASH_ON_DELIVERY';
+  }
+
+  paymentMethodLabel(paymentMethod: OrderPaymentMethod) {
+    return paymentMethodLabels.get(paymentMethod) ?? paymentMethod;
+  }
+
+  orderStatusLabel(status: Order['status']) {
+    if (status === 'PENDING_CONFIRMATION') {
+      return 'Aguardando confirmacao da loja';
+    }
+
+    return status;
+  }
+
+  shortOrderId(orderId: string) {
+    return orderId.slice(0, 8);
+  }
+
+  submitOrder() {
+    this.checkoutErrorMessage.set('');
+    this.checkoutSuccessMessage.set('');
+
+    const establishmentId = this.cartEstablishmentId();
+    const items = this.cartItems();
+
+    if (!establishmentId || items.length === 0) {
+      this.checkoutErrorMessage.set('Adicione itens a sacola antes de finalizar o pedido.');
+      return;
+    }
+
+    if (this.cartHasUnavailableItems()) {
+      this.checkoutErrorMessage.set('Remova os itens indisponiveis da sacola antes de finalizar.');
+      return;
+    }
+
+    if (!this.currentAccount()) {
+      this.setCartFeedback('Entre como cliente para concluir o checkout.', 'info');
+      this.loginAsCustomer();
+      return;
+    }
+
+    if (!this.canCheckout()) {
+      this.checkoutErrorMessage.set('Encerre a sessao atual e entre com um perfil CUSTOMER para finalizar o pedido.');
+      return;
+    }
+
+    const formValue = this.checkoutForm.getRawValue();
+    const changeRequired = formValue.paymentMethod === 'CASH_ON_DELIVERY' ? formValue.changeRequired : false;
+
+    this.isSubmittingOrder.set(true);
+    this.orderApi
+      .create({
+        establishmentId,
+        items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        paymentMethod: formValue.paymentMethod,
+        changeRequired
+      })
+      .pipe(
+        finalize(() => this.isSubmittingOrder.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (order) => {
+          this.lastOrder.set(order);
+          this.checkoutSuccessMessage.set(
+            `Pedido #${this.shortOrderId(order.id)} enviado com sucesso. Total confirmado: ${this.formatPrice(order.totalAmount)}.`
+          );
+          this.setCartFeedback('Pedido enviado e sacola liberada para uma nova compra.', 'success');
+          this.cart.clear();
+          this.checkoutForm.reset({ paymentMethod: 'PIX', changeRequired: false });
+        },
+        error: (error: unknown) => {
+          this.checkoutErrorMessage.set(this.readCheckoutErrorMessage(error));
+
+          if (error instanceof HttpErrorResponse && error.status === 401) {
+            this.authSession.refresh().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+          }
+        }
+      });
   }
 
   selectEstablishment(establishmentId: string) {
@@ -576,6 +1156,7 @@ export class CustomerHomePage {
       .subscribe({
         next: (products) => {
           this.products.set(products);
+          this.cart.syncCatalog(establishmentId, products);
           this.areProductsLoading.set(false);
         },
         error: (error: unknown) => {
@@ -603,5 +1184,39 @@ export class CustomerHomePage {
       this.selectedEstablishmentId.set(nextSelection);
       this.loadProducts(nextSelection);
     }
+  }
+
+  private readCheckoutErrorMessage(error: unknown) {
+    if (error instanceof HttpErrorResponse) {
+      if (error.status === 401) {
+        return 'Sua sessao nao esta autenticada. Entre como cliente para finalizar o pedido.';
+      }
+
+      if (error.status === 403) {
+        return 'Sua conta atual nao pode finalizar pedidos. Use um perfil CUSTOMER.';
+      }
+
+      const apiProblem = error.error as { detail?: string; errors?: string[] } | null;
+      if (apiProblem?.errors?.length) {
+        return apiProblem.errors.join(' | ');
+      }
+
+      if (apiProblem?.detail) {
+        return apiProblem.detail;
+      }
+    }
+
+    return 'Nao foi possivel finalizar o pedido agora.';
+  }
+
+  private clearOrderFeedback() {
+    this.checkoutErrorMessage.set('');
+    this.checkoutSuccessMessage.set('');
+    this.lastOrder.set(null);
+  }
+
+  private setCartFeedback(message: string, kind: 'info' | 'error' | 'success') {
+    this.cartFeedbackMessage.set(message);
+    this.cartFeedbackKind.set(kind);
   }
 }
