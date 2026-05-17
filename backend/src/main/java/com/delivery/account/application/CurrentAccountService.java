@@ -4,11 +4,11 @@ import java.util.Objects;
 
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.core.OAuth2AuthenticatedPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import com.delivery.account.domain.Account;
@@ -48,12 +48,12 @@ public class CurrentAccountService {
 
     @Transactional
     public Account requireMerchant() {
-        Account account = getCurrentAccount();
-        if (account.getProfile() != AccountProfile.MERCHANT) {
-            throw new AccessDeniedException("Acesso permitido apenas para lojistas");
-        }
+        return requireProfile(AccountProfile.MERCHANT, "Acesso permitido apenas para lojistas");
+    }
 
-        return account;
+    @Transactional
+    public Account requireCustomer() {
+        return requireProfile(AccountProfile.CUSTOMER, "Acesso permitido apenas para clientes");
     }
 
     private Account sync(Account account, IdentityData identityData, AccountProfile profile) {
@@ -91,6 +91,15 @@ public class CurrentAccountService {
         }
 
         return merchant ? AccountProfile.MERCHANT : AccountProfile.CUSTOMER;
+    }
+
+    private Account requireProfile(AccountProfile expectedProfile, String message) {
+        Account account = getCurrentAccount();
+        if (account.getProfile() != expectedProfile) {
+            throw new AccessDeniedException(message);
+        }
+
+        return account;
     }
 
     private boolean hasAuthority(Authentication authentication, String authority) {
