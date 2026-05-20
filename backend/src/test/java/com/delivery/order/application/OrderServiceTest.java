@@ -55,10 +55,26 @@ class OrderServiceTest {
             UUID.randomUUID(),
             List.of(),
             OrderPaymentMethod.PIX,
-            false
+            false,
+            deliveryAddress()
         )))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("ao menos um item");
+    }
+
+    @Test
+    void shouldRejectOrderCreationWithoutDeliveryAddress() {
+        when(currentAccountService.requireCustomer()).thenReturn(sampleCustomer());
+
+        assertThatThrownBy(() -> orderService.create(new CreateOrderRequest(
+            UUID.randomUUID(),
+            List.of(item(UUID.randomUUID(), 1)),
+            OrderPaymentMethod.PIX,
+            false,
+            null
+        )))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("endereco de entrega");
     }
 
     @Test
@@ -69,7 +85,8 @@ class OrderServiceTest {
             UUID.randomUUID(),
             List.of(item(UUID.randomUUID(), 0)),
             OrderPaymentMethod.PIX,
-            false
+            false,
+            deliveryAddress()
         )))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Quantidade invalida");
@@ -83,7 +100,8 @@ class OrderServiceTest {
             UUID.randomUUID(),
             List.of(item(UUID.randomUUID(), 1)),
             OrderPaymentMethod.PIX,
-            true
+            true,
+            deliveryAddress()
         )))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Troco");
@@ -99,7 +117,8 @@ class OrderServiceTest {
             existingProduct.getEstablishment().getId(),
             List.of(item(existingProduct.getId(), 1), item(UUID.randomUUID(), 1)),
             OrderPaymentMethod.PIX,
-            false
+            false,
+            deliveryAddress()
         )))
             .isInstanceOf(ResourceNotFoundException.class)
             .hasMessageContaining("produtos");
@@ -115,7 +134,8 @@ class OrderServiceTest {
             unavailableProduct.getEstablishment().getId(),
             List.of(item(unavailableProduct.getId(), 1)),
             OrderPaymentMethod.PIX,
-            false
+            false,
+            deliveryAddress()
         )))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("indisponiveis");
@@ -132,7 +152,8 @@ class OrderServiceTest {
             firstProduct.getEstablishment().getId(),
             List.of(item(firstProduct.getId(), 1), item(secondProduct.getId(), 1)),
             OrderPaymentMethod.CREDIT_CARD,
-            false
+            false,
+            deliveryAddress()
         )))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("unico estabelecimento");
@@ -148,7 +169,8 @@ class OrderServiceTest {
             UUID.randomUUID(),
             List.of(item(product.getId(), 1)),
             OrderPaymentMethod.CASH_ON_DELIVERY,
-            true
+            true,
+            deliveryAddress()
         )))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("estabelecimento selecionado");
@@ -166,7 +188,8 @@ class OrderServiceTest {
             burger.getEstablishment().getId(),
             List.of(item(burger.getId(), 2), item(fries.getId(), 1)),
             OrderPaymentMethod.CASH_ON_DELIVERY,
-            true
+            true,
+            deliveryAddress()
         ));
 
         verify(orderRepository).save(any(Order.class));
@@ -177,10 +200,24 @@ class OrderServiceTest {
         assertThat(response.items().get(0).productName()).isEqualTo("X-Burger");
         assertThat(response.items().get(0).quantity()).isEqualTo(2);
         assertThat(response.changeRequired()).isTrue();
+        assertThat(response.deliveryAddress().zipCode()).isEqualTo("01310930");
+        assertThat(response.deliveryAddress().city()).isEqualTo("Sao Paulo");
     }
 
     private CreateOrderRequest.CreateOrderItemRequest item(UUID productId, int quantity) {
         return new CreateOrderRequest.CreateOrderItemRequest(productId, quantity);
+    }
+
+    private CreateOrderRequest.DeliveryAddressRequest deliveryAddress() {
+        return new CreateOrderRequest.DeliveryAddressRequest(
+            "01310930",
+            "Avenida Paulista",
+            "1500",
+            "Bela Vista",
+            "Sao Paulo",
+            "SP",
+            "Apto 91"
+        );
     }
 
     private Product sampleProduct(Establishment establishment, String name, BigDecimal price, boolean available) {
