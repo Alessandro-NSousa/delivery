@@ -8,11 +8,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 import com.delivery.account.domain.Account;
+import com.delivery.establishment.domain.Address;
 import com.delivery.establishment.domain.Establishment;
 import com.delivery.product.domain.Product;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -57,6 +61,18 @@ public class Order {
     @Column(name = "total_amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal totalAmount;
 
+    @Embedded
+    @AttributeOverrides({
+        @AttributeOverride(name = "zipCode", column = @Column(name = "delivery_zip_code", length = 8)),
+        @AttributeOverride(name = "street", column = @Column(name = "delivery_street")),
+        @AttributeOverride(name = "number", column = @Column(name = "delivery_street_number", length = 20)),
+        @AttributeOverride(name = "district", column = @Column(name = "delivery_district")),
+        @AttributeOverride(name = "city", column = @Column(name = "delivery_city")),
+        @AttributeOverride(name = "state", column = @Column(name = "delivery_state", length = 2)),
+        @AttributeOverride(name = "complement", column = @Column(name = "delivery_complement"))
+    })
+    private Address deliveryAddress;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items = new ArrayList<>();
 
@@ -73,7 +89,8 @@ public class Order {
         Account customer,
         Establishment establishment,
         OrderPaymentMethod paymentMethod,
-        boolean changeRequired
+        boolean changeRequired,
+        Address deliveryAddress
     ) {
         this.id = UUID.randomUUID();
         this.customer = Objects.requireNonNull(customer, "customer nao pode ser nulo");
@@ -81,6 +98,7 @@ public class Order {
         this.status = OrderStatus.PENDING_CONFIRMATION;
         this.paymentMethod = Objects.requireNonNull(paymentMethod, "paymentMethod nao pode ser nulo");
         this.changeRequired = changeRequired;
+        this.deliveryAddress = Objects.requireNonNull(deliveryAddress, "deliveryAddress nao pode ser nulo");
         this.subtotalAmount = BigDecimal.ZERO;
         this.totalAmount = BigDecimal.ZERO;
     }
@@ -142,6 +160,10 @@ public class Order {
 
     public BigDecimal getTotalAmount() {
         return totalAmount;
+    }
+
+    public Address getDeliveryAddress() {
+        return deliveryAddress;
     }
 
     public List<OrderItem> getItems() {

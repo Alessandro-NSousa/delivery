@@ -12,6 +12,7 @@ import org.springframework.validation.annotation.Validated;
 
 import com.delivery.account.application.CurrentAccountService;
 import com.delivery.account.domain.Account;
+import com.delivery.establishment.domain.Address;
 import com.delivery.establishment.domain.Establishment;
 import com.delivery.order.api.CreateOrderRequest;
 import com.delivery.order.api.OrderResponse;
@@ -58,7 +59,13 @@ public class OrderService {
         }
 
         Establishment establishment = validateProducts(request.establishmentId(), quantitiesByProductId, productsById);
-        Order order = new Order(customer, establishment, request.paymentMethod(), request.changeRequired());
+        Order order = new Order(
+            customer,
+            establishment,
+            request.paymentMethod(),
+            request.changeRequired(),
+            toDeliveryAddress(request.deliveryAddress())
+        );
 
         for (Map.Entry<UUID, Integer> itemEntry : quantitiesByProductId.entrySet()) {
             order.addItem(productsById.get(itemEntry.getKey()), itemEntry.getValue());
@@ -72,6 +79,8 @@ public class OrderService {
             throw new BusinessException("Informe ao menos um item para finalizar o pedido");
         }
 
+        validateDeliveryAddress(request.deliveryAddress());
+
         for (CreateOrderRequest.CreateOrderItemRequest item : request.items()) {
             if (item.productId() == null) {
                 throw new BusinessException("A sacola possui um item sem produto valido");
@@ -80,6 +89,28 @@ public class OrderService {
             if (item.quantity() == null || item.quantity() <= 0) {
                 throw new BusinessException("Quantidade invalida para um ou mais itens da sacola");
             }
+        }
+    }
+
+    private void validateDeliveryAddress(CreateOrderRequest.DeliveryAddressRequest deliveryAddress) {
+        if (deliveryAddress == null) {
+            throw new BusinessException("Informe o endereco de entrega para finalizar o pedido");
+        }
+
+        if (!deliveryAddress.zipCode().matches("\\d{8}")) {
+            throw new BusinessException("Informe um CEP valido para o endereco de entrega");
+        }
+
+        if (isBlank(deliveryAddress.street()) ||
+            isBlank(deliveryAddress.number()) ||
+            isBlank(deliveryAddress.district()) ||
+            isBlank(deliveryAddress.city())) {
+            throw new BusinessException("Preencha todos os campos obrigatorios do endereco de entrega");
+        }
+
+        String state = deliveryAddress.state();
+        if (isBlank(state) || state.trim().length() != 2) {
+            throw new BusinessException("Informe uma UF valida para o endereco de entrega");
         }
     }
 
@@ -127,5 +158,21 @@ public class OrderService {
         }
 
         return establishment;
+    }
+
+    private Address toDeliveryAddress(CreateOrderRequest.DeliveryAddressRequest request) {
+        return new Address(
+            request.zipCode(),
+            request.street().trim(),
+            request.number().trim(),
+            request.district().trim(),
+            request.city().trim(),
+            request.state().trim().toUpperCase(),
+            isBlank(request.complement()) ? null : request.complement().trim()
+        );
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }
