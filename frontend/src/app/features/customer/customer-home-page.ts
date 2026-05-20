@@ -1,7 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
@@ -11,14 +11,31 @@ import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
 import { Establishment, establishmentCategoryOptions } from '../establishments/establishment.models';
 import { OrderApi } from '../orders/order-api';
-import { Order, OrderPaymentMethod, paymentMethodOptions } from '../orders/order.models';
+import { DeliveryAddress, Order, OrderPaymentMethod, paymentMethodOptions } from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { Product, productCategoryOptions } from '../products/product.models';
+import { ViaCepApi } from './via-cep-api';
 
 const establishmentCategoryLabels = new Map(establishmentCategoryOptions.map((option) => [option.value, option.label]));
 const productCategoryLabels = new Map(productCategoryOptions.map((option) => [option.value, option.label]));
 const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const zipCodePattern = /^\d{5}-?\d{3}$/;
+const initialDeliveryAddressFormValue = {
+  zipCode: '',
+  street: '',
+  number: '',
+  district: '',
+  city: '',
+  state: '',
+  complement: ''
+};
+
+type DeliveryAddressField = keyof typeof initialDeliveryAddressFormValue;
+
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, '');
+}
 
 @Component({
   selector: 'app-customer-home-page',
@@ -232,6 +249,7 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
                     <p class="label">Ultimo pedido enviado</p>
                     <h3>#{{ shortOrderId(order.id) }}</h3>
                     <p>{{ paymentMethodLabel(order.paymentMethod) }} · {{ formatPrice(order.totalAmount) }}</p>
+                    <p>{{ formatDeliveryAddress(order.deliveryAddress) }}</p>
                   </div>
                   <span class="city-chip">{{ orderStatusLabel(order.status) }}</span>
                 </article>
@@ -324,8 +342,102 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
                 </div>
 
                 <form class="checkout-form" [formGroup]="checkoutForm" (ngSubmit)="submitOrder()">
+                  <div class="section-heading">
+                    <div>
+                      <p class="label">Entrega</p>
+                      <h3>Endereco do pedido</h3>
+                    </div>
+                    @if (canCheckout()) {
+                      <span class="city-chip">Obrigatorio para finalizar</span>
+                    }
+                  </div>
+
+                  @if (canCheckout()) {
+                    <div class="address-grid">
+                      <label class="field">
+                        <span class="field-label">CEP <span class="required-indicator" aria-hidden="true">*</span></span>
+                        <input
+                          formControlName="zipCode"
+                          inputmode="numeric"
+                          autocomplete="postal-code"
+                          maxlength="9"
+                          placeholder="Ex.: 01310-930"
+                          (blur)="lookupZipCode()"
+                        />
+                        @if (deliveryAddressFieldInvalid('zipCode')) {
+                          <small>Informe um CEP valido.</small>
+                        }
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Rua <span class="required-indicator" aria-hidden="true">*</span></span>
+                        <input formControlName="street" autocomplete="address-line1" placeholder="Rua ou avenida" />
+                        @if (deliveryAddressFieldInvalid('street')) {
+                          <small>Informe a rua da entrega.</small>
+                        }
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Numero <span class="required-indicator" aria-hidden="true">*</span></span>
+                        <input formControlName="number" placeholder="Numero" />
+                        @if (deliveryAddressFieldInvalid('number')) {
+                          <small>Informe o numero da entrega.</small>
+                        }
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Bairro <span class="required-indicator" aria-hidden="true">*</span></span>
+                        <input formControlName="district" placeholder="Bairro" />
+                        @if (deliveryAddressFieldInvalid('district')) {
+                          <small>Informe o bairro da entrega.</small>
+                        }
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Cidade <span class="required-indicator" aria-hidden="true">*</span></span>
+                        <input formControlName="city" placeholder="Cidade" />
+                        @if (deliveryAddressFieldInvalid('city')) {
+                          <small>Informe a cidade da entrega.</small>
+                        }
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">UF <span class="required-indicator" aria-hidden="true">*</span></span>
+                        <input formControlName="state" placeholder="UF" maxlength="2" />
+                        @if (deliveryAddressFieldInvalid('state')) {
+                          <small>Informe uma UF com 2 caracteres.</small>
+                        }
+                      </label>
+
+                      <label class="field full-width">
+                        <span>Complemento</span>
+                        <input formControlName="complement" placeholder="Opcional" />
+                      </label>
+                    </div>
+
+                    <p class="helper-text">
+                      Ao informar o CEP, tentamos preencher rua, bairro, cidade e UF automaticamente. Numero e complemento seguem manuais.
+                    </p>
+
+                    @if (isZipCodeLookupLoading()) {
+                      <section class="feedback info">Consultando CEP no ViaCEP...</section>
+                    } @else if (zipCodeLookupMessage()) {
+                      <section
+                        class="feedback"
+                        [class.error]="zipCodeLookupKind() === 'error'"
+                        [class.success]="zipCodeLookupKind() === 'success'"
+                      >
+                        {{ zipCodeLookupMessage() }}
+                      </section>
+                    }
+                  } @else {
+                    <section class="feedback info">
+                      Entre com um perfil CUSTOMER para informar o endereco de entrega e concluir o checkout.
+                    </section>
+                  }
+
                   <label class="field">
-                    <span>Forma de pagamento</span>
+                    <span class="field-label">Forma de pagamento <span class="required-indicator" aria-hidden="true">*</span></span>
                     <select formControlName="paymentMethod">
                       @for (option of paymentMethods; track option.value) {
                         <option [value]="option.value">{{ option.label }}</option>
@@ -334,7 +446,7 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
                   </label>
 
                   <label class="checkbox-row">
-                    <input type="checkbox" formControlName="changeRequired" [disabled]="!isCashPaymentSelected()" />
+                    <input type="checkbox" formControlName="changeRequired" />
                     <span>Precisa de troco na entrega</span>
                   </label>
 
@@ -799,6 +911,24 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       border: 1px solid rgba(23, 49, 38, 0.08);
     }
 
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .section-heading h3 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .address-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .field,
     .checkbox-row {
       display: grid;
@@ -807,11 +937,28 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       font-weight: 600;
     }
 
+    .field-label {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .required-indicator {
+      color: #b42318;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .field.full-width {
+      grid-column: 1 / -1;
+    }
+
     .checkbox-row {
       grid-template-columns: auto 1fr;
       align-items: center;
     }
 
+    input,
     select {
       min-height: 46px;
       border-radius: 14px;
@@ -826,6 +973,12 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
     .checkout-hint {
       color: #5a6a61;
       font-size: 0.95rem;
+    }
+
+    small {
+      color: #7a1f1f;
+      font-size: 0.85rem;
+      font-weight: 700;
     }
 
     .checkout-summary article {
@@ -868,10 +1021,15 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
       .order-confirmation,
       .item-actions,
       .cart-toolbar,
+      .section-heading,
       .checkout-actions,
       .checkout-summary {
         align-items: flex-start;
         flex-direction: column;
+      }
+
+      .address-grid {
+        grid-template-columns: 1fr;
       }
 
       .cart-item {
@@ -899,6 +1057,7 @@ export class CustomerHomePage {
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly orderApi = inject(OrderApi);
   private readonly productApi = inject(ProductApi);
+  private readonly viaCepApi = inject(ViaCepApi);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly paymentMethods = paymentMethodOptions;
@@ -920,6 +1079,9 @@ export class CustomerHomePage {
   readonly cartFeedbackKind = signal<'info' | 'error' | 'success'>('info');
   readonly checkoutErrorMessage = signal('');
   readonly checkoutSuccessMessage = signal('');
+  readonly zipCodeLookupMessage = signal('');
+  readonly zipCodeLookupKind = signal<'error' | 'success'>('success');
+  readonly isZipCodeLookupLoading = signal(false);
   readonly isSubmittingOrder = signal(false);
   readonly lastOrder = signal<Order | null>(null);
   readonly availableProductsCount = computed(() => this.products().filter((product) => product.available).length);
@@ -932,17 +1094,27 @@ export class CustomerHomePage {
   );
 
   readonly checkoutForm = this.formBuilder.nonNullable.group({
+    zipCode: [initialDeliveryAddressFormValue.zipCode, [Validators.required, Validators.pattern(zipCodePattern)]],
+    street: [initialDeliveryAddressFormValue.street, [Validators.required]],
+    number: [initialDeliveryAddressFormValue.number, [Validators.required]],
+    district: [initialDeliveryAddressFormValue.district, [Validators.required]],
+    city: [initialDeliveryAddressFormValue.city, [Validators.required]],
+    state: [initialDeliveryAddressFormValue.state, [Validators.required, Validators.minLength(2), Validators.maxLength(2)]],
+    complement: [initialDeliveryAddressFormValue.complement],
     paymentMethod: ['PIX' as OrderPaymentMethod],
-    changeRequired: [false]
+    changeRequired: [{ value: false, disabled: true }]
   });
 
   constructor() {
     this.checkoutForm.controls.paymentMethod.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((paymentMethod) => {
-      if (paymentMethod !== 'CASH_ON_DELIVERY' && this.checkoutForm.controls.changeRequired.value) {
-        this.checkoutForm.controls.changeRequired.setValue(false);
-      }
+      this.syncChangeRequiredControl(paymentMethod);
     });
 
+    this.checkoutForm.controls.zipCode.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.clearZipCodeLookupFeedback();
+    });
+
+    this.syncChangeRequiredControl(this.checkoutForm.controls.paymentMethod.value);
     this.loadEstablishments();
   }
 
@@ -1027,6 +1199,11 @@ export class CustomerHomePage {
     return paymentMethodLabels.get(paymentMethod) ?? paymentMethod;
   }
 
+  deliveryAddressFieldInvalid(field: DeliveryAddressField) {
+    const control = this.checkoutForm.controls[field];
+    return control.invalid && control.touched;
+  }
+
   orderStatusLabel(status: Order['status']) {
     if (status === 'PENDING_CONFIRMATION') {
       return 'Aguardando confirmacao da loja';
@@ -1037,6 +1214,64 @@ export class CustomerHomePage {
 
   shortOrderId(orderId: string) {
     return orderId.slice(0, 8);
+  }
+
+  formatDeliveryAddress(address: DeliveryAddress) {
+    const streetLine = `${address.street}, ${address.number}`;
+    const complement = address.complement ? ` · ${address.complement}` : '';
+    return `${streetLine} - ${address.district}, ${address.city}/${address.state}${complement}`;
+  }
+
+  lookupZipCode() {
+    const zipCode = digitsOnly(this.checkoutForm.controls.zipCode.value);
+
+    if (!zipCode) {
+      this.clearZipCodeLookupFeedback();
+      return;
+    }
+
+    if (zipCode.length !== 8) {
+      this.checkoutForm.controls.zipCode.markAsTouched();
+      return;
+    }
+
+    if (this.isZipCodeLookupLoading()) {
+      return;
+    }
+
+    this.isZipCodeLookupLoading.set(true);
+    this.viaCepApi
+      .lookup(zipCode)
+      .pipe(
+        finalize(() => this.isZipCodeLookupLoading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (address) => {
+          if (!address) {
+            this.zipCodeLookupKind.set('error');
+            this.zipCodeLookupMessage.set('Nao encontramos esse CEP no ViaCEP. Complete o endereco manualmente.');
+            return;
+          }
+
+          this.checkoutForm.patchValue(
+            {
+              zipCode: address.zipCode,
+              street: address.street,
+              district: address.district,
+              city: address.city,
+              state: address.state
+            },
+            { emitEvent: false }
+          );
+          this.zipCodeLookupKind.set('success');
+          this.zipCodeLookupMessage.set('Rua, bairro, cidade e UF foram preenchidos pelo CEP. Confira numero e complemento.');
+        },
+        error: () => {
+          this.zipCodeLookupKind.set('error');
+          this.zipCodeLookupMessage.set('Nao foi possivel consultar o CEP agora. Confira o endereco manualmente.');
+        }
+      });
   }
 
   submitOrder() {
@@ -1067,8 +1302,15 @@ export class CustomerHomePage {
       return;
     }
 
+    if (this.checkoutForm.invalid) {
+      this.checkoutForm.markAllAsTouched();
+      this.checkoutErrorMessage.set('Preencha o endereco de entrega antes de finalizar o pedido.');
+      return;
+    }
+
     const formValue = this.checkoutForm.getRawValue();
     const changeRequired = formValue.paymentMethod === 'CASH_ON_DELIVERY' ? formValue.changeRequired : false;
+    const deliveryAddress = this.toDeliveryAddress();
 
     this.isSubmittingOrder.set(true);
     this.orderApi
@@ -1076,7 +1318,8 @@ export class CustomerHomePage {
         establishmentId,
         items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
         paymentMethod: formValue.paymentMethod,
-        changeRequired
+        changeRequired,
+        deliveryAddress
       })
       .pipe(
         finalize(() => this.isSubmittingOrder.set(false)),
@@ -1086,11 +1329,17 @@ export class CustomerHomePage {
         next: (order) => {
           this.lastOrder.set(order);
           this.checkoutSuccessMessage.set(
-            `Pedido #${this.shortOrderId(order.id)} enviado com sucesso. Total confirmado: ${this.formatPrice(order.totalAmount)}.`
+            `Pedido #${this.shortOrderId(order.id)} enviado com sucesso para ${this.formatDeliveryAddress(order.deliveryAddress)}. Total confirmado: ${this.formatPrice(order.totalAmount)}.`
           );
           this.setCartFeedback('Pedido enviado e sacola liberada para uma nova compra.', 'success');
           this.cart.clear();
-          this.checkoutForm.reset({ paymentMethod: 'PIX', changeRequired: false });
+          this.clearZipCodeLookupFeedback();
+          this.checkoutForm.reset({
+            ...initialDeliveryAddressFormValue,
+            paymentMethod: 'PIX',
+            changeRequired: false
+          });
+          this.syncChangeRequiredControl('PIX');
         },
         error: (error: unknown) => {
           this.checkoutErrorMessage.set(this.readCheckoutErrorMessage(error));
@@ -1121,6 +1370,20 @@ export class CustomerHomePage {
 
   formatPrice(price: number) {
     return brlFormatter.format(price);
+  }
+
+  private toDeliveryAddress(): DeliveryAddress {
+    const formValue = this.checkoutForm.getRawValue();
+
+    return {
+      zipCode: digitsOnly(formValue.zipCode),
+      street: formValue.street.trim(),
+      number: formValue.number.trim(),
+      district: formValue.district.trim(),
+      city: formValue.city.trim(),
+      state: formValue.state.trim().toUpperCase(),
+      complement: formValue.complement.trim() || null
+    };
   }
 
   private loadEstablishments() {
@@ -1213,6 +1476,25 @@ export class CustomerHomePage {
     this.checkoutErrorMessage.set('');
     this.checkoutSuccessMessage.set('');
     this.lastOrder.set(null);
+  }
+
+  private clearZipCodeLookupFeedback() {
+    this.zipCodeLookupMessage.set('');
+  }
+
+  private syncChangeRequiredControl(paymentMethod: OrderPaymentMethod) {
+    const changeRequiredControl = this.checkoutForm.controls.changeRequired;
+
+    if (paymentMethod === 'CASH_ON_DELIVERY') {
+      changeRequiredControl.enable({ emitEvent: false });
+      return;
+    }
+
+    if (changeRequiredControl.value) {
+      changeRequiredControl.setValue(false, { emitEvent: false });
+    }
+
+    changeRequiredControl.disable({ emitEvent: false });
   }
 
   private setCartFeedback(message: string, kind: 'info' | 'error' | 'success') {

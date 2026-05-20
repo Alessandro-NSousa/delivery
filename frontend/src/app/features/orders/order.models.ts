@@ -1,6 +1,10 @@
+import { EstablishmentAddress } from '../establishments/establishment.models';
+
 export type OrderStatus = 'PENDING_CONFIRMATION';
 
 export type OrderPaymentMethod = 'PIX' | 'CREDIT_CARD' | 'CASH_ON_DELIVERY';
+
+export type DeliveryAddress = EstablishmentAddress;
 
 export interface CreateOrderItemRequest {
   productId: string;
@@ -12,6 +16,7 @@ export interface CreateOrderRequest {
   items: CreateOrderItemRequest[];
   paymentMethod: OrderPaymentMethod;
   changeRequired: boolean;
+  deliveryAddress: DeliveryAddress;
 }
 
 export interface OrderItem {
@@ -31,6 +36,7 @@ export interface Order {
   changeRequired: boolean;
   subtotalAmount: number;
   totalAmount: number;
+  deliveryAddress: DeliveryAddress;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
