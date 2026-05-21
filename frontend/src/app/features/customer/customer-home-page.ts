@@ -11,7 +11,13 @@ import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
 import { Establishment, establishmentCategoryOptions } from '../establishments/establishment.models';
 import { OrderApi } from '../orders/order-api';
-import { DeliveryAddress, Order, OrderPaymentMethod, paymentMethodOptions } from '../orders/order.models';
+import {
+  DeliveryAddress,
+  Order,
+  OrderPaymentMethod,
+  orderStatusLabel as describeOrderStatus,
+  paymentMethodOptions
+} from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { Product, productCategoryOptions } from '../products/product.models';
 import { ViaCepApi } from './via-cep-api';
@@ -1205,11 +1211,7 @@ export class CustomerHomePage {
   }
 
   orderStatusLabel(status: Order['status']) {
-    if (status === 'PENDING_CONFIRMATION') {
-      return 'Aguardando confirmacao da loja';
-    }
-
-    return status;
+    return describeOrderStatus(status);
   }
 
   shortOrderId(orderId: string) {

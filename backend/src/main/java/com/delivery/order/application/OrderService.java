@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
@@ -18,6 +19,7 @@ import com.delivery.order.api.CreateOrderRequest;
 import com.delivery.order.api.OrderResponse;
 import com.delivery.order.domain.Order;
 import com.delivery.order.domain.OrderPaymentMethod;
+import com.delivery.order.domain.OrderStatus;
 import com.delivery.order.infrastructure.OrderRepository;
 import com.delivery.product.domain.Product;
 import com.delivery.product.infrastructure.ProductRepository;
@@ -69,6 +71,43 @@ public class OrderService {
 
         for (Map.Entry<UUID, Integer> itemEntry : quantitiesByProductId.entrySet()) {
             order.addItem(productsById.get(itemEntry.getKey()), itemEntry.getValue());
+        }
+
+        return OrderResponse.from(orderRepository.save(order));
+    }
+
+    @Transactional
+    public List<OrderResponse> listMine(UUID establishmentId) {
+        Account merchant = currentAccountService.requireMerchant();
+        List<Order> orders = establishmentId == null
+            ? orderRepository.findAllByEstablishmentOwnerIdOrderByCreatedAtDesc(merchant.getId())
+            : orderRepository.findAllByEstablishmentOwnerIdAndEstablishmentIdOrderByCreatedAtDesc(
+                merchant.getId(),
+                establishmentId
+            );
+
+        return orders.stream().map(OrderResponse::from).toList();
+    }
+
+    @Transactional
+    public OrderResponse updateStatus(UUID orderId, OrderStatus status) {
+        Account merchant = currentAccountService.requireMerchant();
+
+        if (status == null) {
+            throw new BusinessException("Informe o novo status do pedido");
+        }
+
+        Order order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new ResourceNotFoundException("Pedido nao encontrado"));
+
+        if (!order.getEstablishment().isOwnedBy(merchant.getId())) {
+            throw new AccessDeniedException("Voce nao pode atualizar pedidos de outra loja");
+        }
+
+        try {
+            order.transitionTo(status);
+        } catch (IllegalStateException ex) {
+            throw new BusinessException(ex.getMessage());
         }
 
         return OrderResponse.from(orderRepository.save(order));

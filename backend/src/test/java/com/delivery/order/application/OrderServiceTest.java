@@ -2,6 +2,7 @@ package com.delivery.order.application;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -14,6 +15,7 @@ import org.mockito.Mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.delivery.account.application.CurrentAccountService;
 import com.delivery.account.domain.Account;
@@ -25,6 +27,7 @@ import com.delivery.order.api.CreateOrderRequest;
 import com.delivery.order.api.OrderResponse;
 import com.delivery.order.domain.Order;
 import com.delivery.order.domain.OrderPaymentMethod;
+import com.delivery.order.domain.OrderStatus;
 import com.delivery.order.infrastructure.OrderRepository;
 import com.delivery.product.domain.Product;
 import com.delivery.product.domain.ProductCategory;
@@ -204,6 +207,77 @@ class OrderServiceTest {
         assertThat(response.deliveryAddress().city()).isEqualTo("Sao Paulo");
     }
 
+    @Test
+    void shouldListReceivedOrdersForMerchant() {
+        Account merchant = sampleMerchant();
+        Order firstOrder = sampleOrder(sampleEstablishment(merchant), OrderPaymentMethod.PIX);
+        Order secondOrder = sampleOrder(sampleEstablishment(merchant), OrderPaymentMethod.CASH_ON_DELIVERY);
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(orderRepository.findAllByEstablishmentOwnerIdOrderByCreatedAtDesc(merchant.getId()))
+            .thenReturn(List.of(firstOrder, secondOrder));
+
+        List<OrderResponse> response = orderService.listMine(null);
+
+        verify(orderRepository).findAllByEstablishmentOwnerIdOrderByCreatedAtDesc(merchant.getId());
+        assertThat(response).extracting(OrderResponse::id).containsExactly(firstOrder.getId(), secondOrder.getId());
+    }
+
+    @Test
+    void shouldListReceivedOrdersFilteredByEstablishment() {
+        Account merchant = sampleMerchant();
+        Establishment establishment = sampleEstablishment(merchant);
+        Order order = sampleOrder(establishment, OrderPaymentMethod.PIX);
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(orderRepository.findAllByEstablishmentOwnerIdAndEstablishmentIdOrderByCreatedAtDesc(merchant.getId(), establishment.getId()))
+            .thenReturn(List.of(order));
+
+        List<OrderResponse> response = orderService.listMine(establishment.getId());
+
+        verify(orderRepository).findAllByEstablishmentOwnerIdAndEstablishmentIdOrderByCreatedAtDesc(
+            merchant.getId(),
+            establishment.getId()
+        );
+        assertThat(response).extracting(OrderResponse::establishmentId).containsExactly(establishment.getId());
+    }
+
+    @Test
+    void shouldAdvanceCashOnDeliveryOrderToPreparing() {
+        Account merchant = sampleMerchant();
+        Order order = sampleOrder(sampleEstablishment(merchant), OrderPaymentMethod.CASH_ON_DELIVERY);
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        when(orderRepository.save(order)).thenAnswer(invocation -> invocation.getArgument(0));
+
+        OrderResponse response = orderService.updateStatus(order.getId(), OrderStatus.PREPARING);
+
+        verify(orderRepository).save(order);
+        assertThat(response.status()).isEqualTo(OrderStatus.PREPARING);
+    }
+
+    @Test
+    void shouldRejectInvalidTransitionForOnlinePaymentOrder() {
+        Account merchant = sampleMerchant();
+        Order order = sampleOrder(sampleEstablishment(merchant), OrderPaymentMethod.PIX);
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.updateStatus(order.getId(), OrderStatus.PREPARING))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Transicao de status invalida");
+    }
+
+    @Test
+    void shouldRejectStatusUpdateForOrderFromAnotherMerchant() {
+        Account merchant = sampleMerchant();
+        Order order = sampleOrder(sampleEstablishment(sampleMerchant()), OrderPaymentMethod.PIX);
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.updateStatus(order.getId(), OrderStatus.PAYMENT_PENDING))
+            .isInstanceOf(AccessDeniedException.class)
+            .hasMessageContaining("outra loja");
+    }
+
     private CreateOrderRequest.CreateOrderItemRequest item(UUID productId, int quantity) {
         return new CreateOrderRequest.CreateOrderItemRequest(productId, quantity);
     }
@@ -230,6 +304,18 @@ class OrderServiceTest {
             "https://images.delivery.local/" + name.toLowerCase().replace(' ', '-') + ".jpg",
             available
         );
+    }
+
+    private Order sampleOrder(Establishment establishment, OrderPaymentMethod paymentMethod) {
+        Order order = new Order(
+            sampleCustomer(),
+            establishment,
+            paymentMethod,
+            paymentMethod == OrderPaymentMethod.CASH_ON_DELIVERY,
+            new Address("01310930", "Avenida Paulista", "1500", "Bela Vista", "Sao Paulo", "SP", "Apto 91")
+        );
+        order.addItem(sampleProduct(establishment, "Pedido teste", new BigDecimal("32.90"), true), 1);
+        return order;
     }
 
     private Establishment sampleEstablishment(Account owner) {
