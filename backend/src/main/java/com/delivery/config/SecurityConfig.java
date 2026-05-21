@@ -51,8 +51,9 @@ public class SecurityConfig {
             .authorizeHttpRequests((authorize) -> authorize
                 .requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/me/establishments").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/me/establishments", "/api/me/orders", "/api/me/orders/**").authenticated()
                 .requestMatchers(HttpMethod.POST, "/api/establishments", "/api/establishments/*/products", "/api/orders").authenticated()
+                .requestMatchers(HttpMethod.PATCH, "/api/me/orders/*/status").authenticated()
                 .anyRequest().authenticated()
             )
             .oauth2Login((oauth2Login) -> oauth2Login

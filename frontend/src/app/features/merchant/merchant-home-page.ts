@@ -14,6 +14,17 @@ import {
   EstablishmentCategory,
   establishmentCategoryOptions
 } from '../establishments/establishment.models';
+import { OrderApi } from '../orders/order-api';
+import {
+  DeliveryAddress,
+  nextMerchantOrderActionLabel,
+  nextMerchantOrderStatus,
+  Order,
+  OrderPaymentMethod,
+  OrderStatus,
+  orderStatusLabel as describeOrderStatus,
+  paymentMethodOptions
+} from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { CreateProductRequest, Product, ProductCategory, productCategoryOptions } from '../products/product.models';
 
@@ -44,7 +55,9 @@ const initialProductFormValue = {
 };
 
 const productCategoryLabels = new Map(productCategoryOptions.map((option) => [option.value, option.label]));
+const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 type EstablishmentFormField = keyof typeof initialEstablishmentFormValue;
 type ProductFormField = keyof typeof initialProductFormValue;
@@ -88,6 +101,14 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
       @if (productErrorMessage()) {
         <section class="feedback error">{{ productErrorMessage() }}</section>
+      }
+
+      @if (orderSuccessMessage()) {
+        <section class="feedback success">{{ orderSuccessMessage() }}</section>
+      }
+
+      @if (orderErrorMessage()) {
+        <section class="feedback error">{{ orderErrorMessage() }}</section>
       }
 
       @if (isWorkspaceLoading()) {
@@ -404,6 +425,82 @@ type ProductFormField = keyof typeof initialProductFormValue;
               }
             </div>
 
+            <div>
+              <div class="orders-header">
+                <p class="label section-gap">Pedidos recebidos</p>
+                @if (selectedEstablishment()) {
+                  <span class="chip alt">{{ orders().length }} pedidos</span>
+                }
+              </div>
+
+              @if (selectedEstablishment(); as establishment) {
+                <h2>{{ establishment.tradeName }}</h2>
+                <p class="orders-summary">Acompanhe os pedidos recebidos e avance o fluxo operacional da loja.</p>
+
+                @if (ordersErrorMessage()) {
+                  <p class="catalog-error">{{ ordersErrorMessage() }}</p>
+                } @else if (isOrdersLoading()) {
+                  <p>Carregando pedidos recebidos...</p>
+                } @else if (orders().length === 0) {
+                  <p>Nenhum pedido recebido para esta loja ainda.</p>
+                } @else {
+                  <div class="order-list">
+                    @for (order of orders(); track order.id) {
+                      <article class="order-card">
+                        <div class="order-head">
+                          <div>
+                            <p class="label inner">Pedido #{{ shortOrderId(order.id) }}</p>
+                            <strong>{{ formatPrice(order.totalAmount) }}</strong>
+                          </div>
+                          <span class="status-chip">{{ orderStatusLabel(order.status) }}</span>
+                        </div>
+
+                        <div class="order-meta">
+                          <span>{{ paymentMethodLabel(order.paymentMethod) }}</span>
+                          <span>{{ formatDateTime(order.createdAt) }}</span>
+                        </div>
+
+                        <p class="order-address">{{ formatDeliveryAddress(order.deliveryAddress) }}</p>
+
+                        <div class="order-items">
+                          @for (item of order.items; track item.productId) {
+                            <div class="order-item-row">
+                              <span>{{ item.quantity }}x {{ item.productName }}</span>
+                              <strong>{{ formatPrice(item.lineTotal) }}</strong>
+                            </div>
+                          }
+                        </div>
+
+                        @if (order.paymentMethod === 'CASH_ON_DELIVERY') {
+                          <p class="order-note">
+                            {{ order.changeRequired ? 'Pagamento na entrega com troco solicitado.' : 'Pagamento na entrega sem troco.' }}
+                          </p>
+                        }
+
+                        <div class="order-action-row">
+                          @if (nextOrderActionLabel(order); as actionLabel) {
+                            <button
+                              type="button"
+                              class="primary-link"
+                              (click)="advanceOrder(order)"
+                              [disabled]="pendingOrderActionId() === order.id"
+                            >
+                              {{ pendingOrderActionId() === order.id ? 'Atualizando...' : actionLabel }}
+                            </button>
+                          } @else {
+                            <span class="order-finished">Fluxo encerrado neste pedido.</span>
+                          }
+                        </div>
+                      </article>
+                    }
+                  </div>
+                }
+              } @else {
+                <h2>Selecione uma loja</h2>
+                <p>Escolha um estabelecimento para acompanhar os pedidos recebidos.</p>
+              }
+            </div>
+
             <a routerLink="/cliente" class="secondary-link">Abrir area do cliente</a>
           </aside>
         </section>
@@ -650,7 +747,8 @@ type ProductFormField = keyof typeof initialProductFormValue;
     }
 
     .submit-button[disabled],
-    .secondary-button[disabled] {
+    .secondary-button[disabled],
+    .primary-link[disabled] {
       opacity: 0.7;
       cursor: progress;
     }
@@ -679,7 +777,8 @@ type ProductFormField = keyof typeof initialProductFormValue;
     }
 
     .selection-list,
-    .product-preview-list {
+    .product-preview-list,
+    .order-list {
       display: grid;
       gap: 12px;
     }
@@ -716,6 +815,68 @@ type ProductFormField = keyof typeof initialProductFormValue;
       align-items: center;
     }
 
+    .orders-header,
+    .order-head,
+    .order-meta,
+    .order-item-row,
+    .order-action-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .orders-summary {
+      margin-bottom: 12px;
+    }
+
+    .order-card {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(23, 49, 38, 0.08);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(29, 92, 70, 0.12);
+      color: #1d5c46;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .order-meta,
+    .order-address,
+    .order-note,
+    .order-finished {
+      color: #3f5144;
+      font-size: 0.95rem;
+    }
+
+    .order-meta,
+    .order-item-row {
+      font-size: 0.92rem;
+    }
+
+    .order-items {
+      display: grid;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .order-item-row strong,
+    .order-head strong {
+      color: #173126;
+    }
+
     .inner {
       margin-bottom: 6px;
     }
@@ -743,7 +904,12 @@ type ProductFormField = keyof typeof initialProductFormValue;
       }
 
       .section-heading,
-      .side-header {
+      .side-header,
+      .orders-header,
+      .order-head,
+      .order-meta,
+      .order-item-row,
+      .order-action-row {
         align-items: flex-start;
         flex-direction: column;
       }
@@ -754,6 +920,7 @@ export class MerchantHomePage {
   private readonly formBuilder = inject(FormBuilder);
   private readonly authSession = inject(AuthSessionService);
   private readonly establishmentApi = inject(EstablishmentApi);
+  private readonly orderApi = inject(OrderApi);
   private readonly productApi = inject(ProductApi);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -764,17 +931,23 @@ export class MerchantHomePage {
   readonly isSubmittingProduct = signal(false);
   readonly isCatalogLoading = signal(false);
   readonly isProductsLoading = signal(false);
+  readonly isOrdersLoading = signal(false);
   readonly establishmentSuccessMessage = signal('');
   readonly establishmentErrorMessage = signal('');
   readonly productSuccessMessage = signal('');
   readonly productErrorMessage = signal('');
+  readonly orderSuccessMessage = signal('');
+  readonly orderErrorMessage = signal('');
   readonly catalogErrorMessage = signal('');
+  readonly ordersErrorMessage = signal('');
   readonly accessMessage = signal('');
+  readonly pendingOrderActionId = signal<string | null>(null);
   readonly currentAccount = this.authSession.currentAccount;
   readonly isSessionBusy = this.authSession.isLoading;
   readonly establishments = signal<Establishment[]>([]);
   readonly selectedEstablishmentId = signal<string | null>(null);
   readonly products = signal<Product[]>([]);
+  readonly orders = signal<Order[]>([]);
   readonly canManageCatalog = computed(() => this.currentAccount()?.profile === 'MERCHANT');
   readonly selectedEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.selectedEstablishmentId()) ?? null
@@ -903,8 +1076,38 @@ export class MerchantHomePage {
       return;
     }
 
+    this.clearOrderFeedback();
     this.selectedEstablishmentId.set(establishmentId);
-    this.loadProducts(establishmentId);
+    this.loadSelectedEstablishmentWorkspace(establishmentId);
+  }
+
+  advanceOrder(order: Order) {
+    const nextStatus = nextMerchantOrderStatus(order);
+
+    if (!nextStatus) {
+      return;
+    }
+
+    this.pendingOrderActionId.set(order.id);
+    this.clearOrderFeedback();
+
+    this.orderApi
+      .updateStatus(order.id, nextStatus)
+      .pipe(
+        finalize(() => this.pendingOrderActionId.set(null)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (updatedOrder) => {
+          this.orderSuccessMessage.set(
+            `Pedido #${this.shortOrderId(updatedOrder.id)} atualizado para ${this.orderStatusLabel(updatedOrder.status)}.`
+          );
+          this.orders.update((orders) => orders.map((item) => (item.id === updatedOrder.id ? updatedOrder : item)));
+        },
+        error: (error: unknown) => {
+          this.orderErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel atualizar o status do pedido agora.'));
+        }
+      });
   }
 
   establishmentFieldInvalid(fieldName: EstablishmentFormField) {
@@ -919,6 +1122,32 @@ export class MerchantHomePage {
 
   productCategoryName(category: Product['category']) {
     return productCategoryLabels.get(category) ?? category;
+  }
+
+  paymentMethodLabel(paymentMethod: OrderPaymentMethod) {
+    return paymentMethodLabels.get(paymentMethod) ?? paymentMethod;
+  }
+
+  orderStatusLabel(status: OrderStatus) {
+    return describeOrderStatus(status);
+  }
+
+  nextOrderActionLabel(order: Pick<Order, 'status' | 'paymentMethod'>) {
+    return nextMerchantOrderActionLabel(order);
+  }
+
+  shortOrderId(orderId: string) {
+    return orderId.slice(0, 8);
+  }
+
+  formatDateTime(value: string) {
+    return dateTimeFormatter.format(new Date(value));
+  }
+
+  formatDeliveryAddress(address: DeliveryAddress) {
+    const streetLine = `${address.street}, ${address.number}`;
+    const complement = address.complement ? ` · ${address.complement}` : '';
+    return `${streetLine} - ${address.district}, ${address.city}/${address.state}${complement}`;
   }
 
   formatPrice(price: number) {
@@ -942,6 +1171,7 @@ export class MerchantHomePage {
             this.establishments.set([]);
             this.selectedEstablishmentId.set(null);
             this.products.set([]);
+            this.orders.set([]);
             this.accessMessage.set(
               this.authSession.feedbackMessage() ||
                 'Sessao de lojista necessaria para gerenciar estabelecimentos e produtos.'
@@ -953,6 +1183,7 @@ export class MerchantHomePage {
             this.establishments.set([]);
             this.selectedEstablishmentId.set(null);
             this.products.set([]);
+            this.orders.set([]);
             this.accessMessage.set('Sua sessao atual nao possui perfil de lojista.');
             return;
           }
@@ -983,6 +1214,7 @@ export class MerchantHomePage {
           this.establishments.set([]);
           this.selectedEstablishmentId.set(null);
           this.products.set([]);
+          this.orders.set([]);
         }
       });
   }
@@ -1008,10 +1240,32 @@ export class MerchantHomePage {
       });
   }
 
+  private loadOrders(establishmentId: string) {
+    this.isOrdersLoading.set(true);
+    this.ordersErrorMessage.set('');
+
+    this.orderApi
+      .listMine(establishmentId)
+      .pipe(
+        finalize(() => this.isOrdersLoading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (orders) => {
+          this.orders.set(orders);
+        },
+        error: (error: unknown) => {
+          this.ordersErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar os pedidos recebidos agora.'));
+          this.orders.set([]);
+        }
+      });
+  }
+
   private syncSelection(establishments: Establishment[], preferredEstablishmentId?: string) {
     if (establishments.length === 0) {
       this.selectedEstablishmentId.set(null);
       this.products.set([]);
+      this.orders.set([]);
       return;
     }
 
@@ -1023,8 +1277,18 @@ export class MerchantHomePage {
 
     if (nextSelection) {
       this.selectedEstablishmentId.set(nextSelection);
-      this.loadProducts(nextSelection);
+      this.loadSelectedEstablishmentWorkspace(nextSelection);
     }
+  }
+
+  private loadSelectedEstablishmentWorkspace(establishmentId: string) {
+    this.loadProducts(establishmentId);
+    this.loadOrders(establishmentId);
+  }
+
+  private clearOrderFeedback() {
+    this.orderSuccessMessage.set('');
+    this.orderErrorMessage.set('');
   }
 
   private toEstablishmentRequest(): CreateEstablishmentRequest {

@@ -170,6 +170,33 @@ public class Order {
         return List.copyOf(items);
     }
 
+    public List<OrderStatus> getAllowedNextStatuses() {
+        return switch (status) {
+            case PENDING_CONFIRMATION -> requiresPaymentConfirmation()
+                ? List.of(OrderStatus.PAYMENT_PENDING)
+                : List.of(OrderStatus.PREPARING);
+            case PAYMENT_PENDING -> List.of(OrderStatus.PAYMENT_CONFIRMED);
+            case PAYMENT_CONFIRMED -> List.of(OrderStatus.PREPARING);
+            case PREPARING -> List.of(OrderStatus.OUT_FOR_DELIVERY);
+            case OUT_FOR_DELIVERY -> List.of(OrderStatus.DELIVERED);
+            case DELIVERED -> List.of();
+        };
+    }
+
+    public void transitionTo(OrderStatus nextStatus) {
+        Objects.requireNonNull(nextStatus, "nextStatus nao pode ser nulo");
+
+        if (status == nextStatus) {
+            throw new IllegalStateException("Pedido ja esta com o status informado");
+        }
+
+        if (!getAllowedNextStatuses().contains(nextStatus)) {
+            throw new IllegalStateException("Transicao de status invalida para o pedido");
+        }
+
+        status = nextStatus;
+    }
+
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
@@ -183,5 +210,9 @@ public class Order {
             .map(OrderItem::getLineTotal)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
         totalAmount = subtotalAmount;
+    }
+
+    private boolean requiresPaymentConfirmation() {
+        return paymentMethod != OrderPaymentMethod.CASH_ON_DELIVERY;
     }
 }
