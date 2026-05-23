@@ -11,6 +11,7 @@ import { OrderApi } from '../orders/order-api';
 import { Order } from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { Product } from '../products/product.models';
+import { ViaCepApi } from '../customer/via-cep-api';
 import { MerchantHomePage } from './merchant-home-page';
 
 describe('MerchantHomePage', () => {
@@ -47,6 +48,10 @@ describe('MerchantHomePage', () => {
     )
   };
 
+  const viaCepApiStub = {
+    lookup: jasmine.createSpy('lookup').and.returnValue(of(null))
+  };
+
   beforeEach(async () => {
     authSessionStub.loginAs.calls.reset();
     authSessionStub.logout.calls.reset();
@@ -57,6 +62,7 @@ describe('MerchantHomePage', () => {
     productApiStub.create.calls.reset();
     orderApiStub.listMine.calls.reset();
     orderApiStub.updateStatus.calls.reset();
+    viaCepApiStub.lookup.calls.reset();
 
     currentAccount.set({
       id: 'merchant-1',
@@ -73,7 +79,8 @@ describe('MerchantHomePage', () => {
         { provide: AuthSessionService, useValue: authSessionStub },
         { provide: EstablishmentApi, useValue: establishmentApiStub },
         { provide: ProductApi, useValue: productApiStub },
-        { provide: OrderApi, useValue: orderApiStub }
+        { provide: OrderApi, useValue: orderApiStub },
+        { provide: ViaCepApi, useValue: viaCepApiStub }
       ]
     }).compileComponents();
   });
@@ -102,6 +109,49 @@ describe('MerchantHomePage', () => {
     expect(orderApiStub.updateStatus).toHaveBeenCalledWith('order-1', 'PAYMENT_PENDING');
     expect(component.orders()[0].status).toBe('PAYMENT_PENDING');
     expect(component.orderSuccessMessage()).toContain('Pedido #order-1');
+  });
+
+  it('autofills establishment address fields from ViaCEP and preserves manual fields', () => {
+    viaCepApiStub.lookup.and.returnValue(
+      of({
+        zipCode: '01310930',
+        street: 'Avenida Paulista',
+        district: 'Bela Vista',
+        city: 'Sao Paulo',
+        state: 'SP'
+      })
+    );
+
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.establishmentForm.patchValue({
+      zipCode: '01310-930',
+      number: '1500',
+      complement: 'Loja 12'
+    });
+
+    component.lookupZipCode();
+
+    expect(viaCepApiStub.lookup).toHaveBeenCalledWith('01310930');
+    expect(component.establishmentForm.getRawValue()).toEqual({
+      tradeName: '',
+      corporateName: '',
+      cnpj: '',
+      phone: '',
+      email: '',
+      category: 'RESTAURANT',
+      openingHours: 'Seg-Dom 18:00-23:00',
+      zipCode: '01310930',
+      street: 'Avenida Paulista',
+      number: '1500',
+      district: 'Bela Vista',
+      city: 'Sao Paulo',
+      state: 'SP',
+      complement: 'Loja 12'
+    });
+    expect(component.zipCodeLookupMessage()).toContain('preenchidos pelo CEP');
   });
 
   function sampleEstablishment(): Establishment {

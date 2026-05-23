@@ -27,6 +27,7 @@ import {
 } from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { CreateProductRequest, Product, ProductCategory, productCategoryOptions } from '../products/product.models';
+import { ViaCepApi } from '../customer/via-cep-api';
 
 const initialEstablishmentFormValue = {
   tradeName: '',
@@ -58,6 +59,7 @@ const productCategoryLabels = new Map(productCategoryOptions.map((option) => [op
 const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+const zipCodePattern = /^\d{5}-?\d{3}$/;
 
 type EstablishmentFormField = keyof typeof initialEstablishmentFormValue;
 type ProductFormField = keyof typeof initialProductFormValue;
@@ -220,7 +222,13 @@ type ProductFormField = keyof typeof initialProductFormValue;
               <div class="form-grid">
                 <label>
                   <span>CEP</span>
-                  <input formControlName="zipCode" inputmode="numeric" placeholder="Somente 8 digitos" />
+                  <input
+                    formControlName="zipCode"
+                    inputmode="numeric"
+                    maxlength="9"
+                    placeholder="Ex.: 01310-930"
+                    (blur)="lookupZipCode()"
+                  />
                   @if (establishmentFieldInvalid('zipCode')) {
                     <small>Informe um CEP com 8 digitos.</small>
                   }
@@ -271,6 +279,23 @@ type ProductFormField = keyof typeof initialProductFormValue;
                   <input formControlName="complement" placeholder="Opcional" />
                 </label>
               </div>
+
+              <p class="helper-text">
+                Ao informar o CEP, tentamos preencher rua, bairro, cidade e UF automaticamente. Numero e complemento
+                seguem manuais.
+              </p>
+
+              @if (isZipCodeLookupLoading()) {
+                <section class="feedback info">Consultando CEP no ViaCEP...</section>
+              } @else if (zipCodeLookupMessage()) {
+                <section
+                  class="feedback"
+                  [class.error]="zipCodeLookupKind() === 'error'"
+                  [class.success]="zipCodeLookupKind() === 'success'"
+                >
+                  {{ zipCodeLookupMessage() }}
+                </section>
+              }
 
               <button class="submit-button" type="submit" [disabled]="isSubmittingEstablishment()">
                 {{ isSubmittingEstablishment() ? 'Cadastrando...' : 'Cadastrar estabelecimento' }}
@@ -627,6 +652,12 @@ type ProductFormField = keyof typeof initialProductFormValue;
       border: 1px solid rgba(24, 68, 102, 0.18);
     }
 
+    .info {
+      background: rgba(125, 79, 47, 0.1);
+      color: #7d4f2f;
+      border: 1px solid rgba(125, 79, 47, 0.18);
+    }
+
     .form-stack,
     .form-panel,
     .side-panel {
@@ -733,6 +764,10 @@ type ProductFormField = keyof typeof initialProductFormValue;
     small {
       color: #9a3030;
       font-weight: 600;
+    }
+
+    .helper-text {
+      font-size: 0.95rem;
     }
 
     .full-width {
@@ -922,6 +957,7 @@ export class MerchantHomePage {
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly orderApi = inject(OrderApi);
   private readonly productApi = inject(ProductApi);
+  private readonly viaCepApi = inject(ViaCepApi);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly categories = establishmentCategoryOptions;
@@ -941,6 +977,9 @@ export class MerchantHomePage {
   readonly catalogErrorMessage = signal('');
   readonly ordersErrorMessage = signal('');
   readonly accessMessage = signal('');
+  readonly zipCodeLookupMessage = signal('');
+  readonly zipCodeLookupKind = signal<'error' | 'success'>('success');
+  readonly isZipCodeLookupLoading = signal(false);
   readonly pendingOrderActionId = signal<string | null>(null);
   readonly currentAccount = this.authSession.currentAccount;
   readonly isSessionBusy = this.authSession.isLoading;
@@ -961,7 +1000,7 @@ export class MerchantHomePage {
     email: [initialEstablishmentFormValue.email, [Validators.required, Validators.email]],
     category: [initialEstablishmentFormValue.category, [Validators.required]],
     openingHours: [initialEstablishmentFormValue.openingHours, [Validators.required]],
-    zipCode: [initialEstablishmentFormValue.zipCode, [Validators.required, Validators.pattern(/^\d{8}$/)]],
+    zipCode: [initialEstablishmentFormValue.zipCode, [Validators.required, Validators.pattern(zipCodePattern)]],
     street: [initialEstablishmentFormValue.street, [Validators.required]],
     number: [initialEstablishmentFormValue.number, [Validators.required]],
     district: [initialEstablishmentFormValue.district, [Validators.required]],
@@ -980,6 +1019,10 @@ export class MerchantHomePage {
   });
 
   constructor() {
+    this.establishmentForm.controls.zipCode.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.clearZipCodeLookupFeedback();
+    });
+
     this.loadWorkspace();
   }
 
@@ -1022,6 +1065,7 @@ export class MerchantHomePage {
             `${establishment.tradeName} cadastrado com sucesso e pronto para receber produtos.`
           );
           this.establishmentForm.reset(initialEstablishmentFormValue);
+          this.clearZipCodeLookupFeedback();
           this.loadEstablishments(establishment.id);
         },
         error: (error: unknown) => {
@@ -1079,6 +1123,58 @@ export class MerchantHomePage {
     this.clearOrderFeedback();
     this.selectedEstablishmentId.set(establishmentId);
     this.loadSelectedEstablishmentWorkspace(establishmentId);
+  }
+
+  lookupZipCode() {
+    const zipCode = digitsOnly(this.establishmentForm.controls.zipCode.value);
+
+    if (!zipCode) {
+      this.clearZipCodeLookupFeedback();
+      return;
+    }
+
+    if (zipCode.length !== 8) {
+      this.establishmentForm.controls.zipCode.markAsTouched();
+      return;
+    }
+
+    if (this.isZipCodeLookupLoading()) {
+      return;
+    }
+
+    this.isZipCodeLookupLoading.set(true);
+    this.viaCepApi
+      .lookup(zipCode)
+      .pipe(
+        finalize(() => this.isZipCodeLookupLoading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (address) => {
+          if (!address) {
+            this.zipCodeLookupKind.set('error');
+            this.zipCodeLookupMessage.set('Nao encontramos esse CEP no ViaCEP. Complete o endereco manualmente.');
+            return;
+          }
+
+          this.establishmentForm.patchValue(
+            {
+              zipCode: address.zipCode,
+              street: address.street,
+              district: address.district,
+              city: address.city,
+              state: address.state
+            },
+            { emitEvent: false }
+          );
+          this.zipCodeLookupKind.set('success');
+          this.zipCodeLookupMessage.set('Rua, bairro, cidade e UF foram preenchidos pelo CEP. Confira numero e complemento.');
+        },
+        error: () => {
+          this.zipCodeLookupKind.set('error');
+          this.zipCodeLookupMessage.set('Nao foi possivel consultar o CEP agora. Confira o endereco manualmente.');
+        }
+      });
   }
 
   advanceOrder(order: Order) {
@@ -1284,6 +1380,11 @@ export class MerchantHomePage {
   private loadSelectedEstablishmentWorkspace(establishmentId: string) {
     this.loadProducts(establishmentId);
     this.loadOrders(establishmentId);
+  }
+
+  private clearZipCodeLookupFeedback() {
+    this.zipCodeLookupMessage.set('');
+    this.zipCodeLookupKind.set('success');
   }
 
   private clearOrderFeedback() {
