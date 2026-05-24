@@ -221,7 +221,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
               <div class="form-grid">
                 <label>
-                  <span>CEP</span>
+                  <span class="field-label">CEP <span class="required-indicator" aria-hidden="true">*</span></span>
                   <input
                     formControlName="zipCode"
                     inputmode="numeric"
@@ -235,7 +235,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
                 </label>
 
                 <label>
-                  <span>Rua</span>
+                  <span class="field-label">Rua <span class="required-indicator" aria-hidden="true">*</span></span>
                   <input formControlName="street" placeholder="Rua ou avenida" />
                   @if (establishmentFieldInvalid('street')) {
                     <small>Informe a rua.</small>
@@ -243,7 +243,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
                 </label>
 
                 <label>
-                  <span>Numero</span>
+                  <span class="field-label">Numero <span class="required-indicator" aria-hidden="true">*</span></span>
                   <input formControlName="number" placeholder="Numero" />
                   @if (establishmentFieldInvalid('number')) {
                     <small>Informe o numero.</small>
@@ -251,7 +251,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
                 </label>
 
                 <label>
-                  <span>Bairro</span>
+                  <span class="field-label">Bairro <span class="required-indicator" aria-hidden="true">*</span></span>
                   <input formControlName="district" placeholder="Bairro" />
                   @if (establishmentFieldInvalid('district')) {
                     <small>Informe o bairro.</small>
@@ -259,7 +259,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
                 </label>
 
                 <label>
-                  <span>Cidade</span>
+                  <span class="field-label">Cidade <span class="required-indicator" aria-hidden="true">*</span></span>
                   <input formControlName="city" placeholder="Cidade" />
                   @if (establishmentFieldInvalid('city')) {
                     <small>Informe a cidade.</small>
@@ -267,7 +267,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
                 </label>
 
                 <label>
-                  <span>UF</span>
+                  <span class="field-label">UF <span class="required-indicator" aria-hidden="true">*</span></span>
                   <input formControlName="state" maxlength="2" placeholder="SP" />
                   @if (establishmentFieldInvalid('state')) {
                     <small>Informe a UF com 2 letras.</small>
@@ -742,6 +742,18 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
     label span {
       font-size: 0.95rem;
+    }
+
+    .field-label {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .required-indicator {
+      color: #b42318;
+      font-weight: 800;
+      line-height: 1;
     }
 
     input,

@@ -154,6 +154,14 @@ describe('MerchantHomePage', () => {
     expect(component.zipCodeLookupMessage()).toContain('preenchidos pelo CEP');
   });
 
+  it('renders required field indicators in establishment address labels', () => {
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.querySelectorAll('.required-indicator')).toHaveSize(6);
+  });
+
   function sampleEstablishment(): Establishment {
     return {
       id: 'establishment-1',
