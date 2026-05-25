@@ -10,6 +10,8 @@ import { Establishment } from '../establishments/establishment.models';
 import { CreateOrderRequest, DeliveryAddress, Order } from '../orders/order.models';
 import { OrderApi } from '../orders/order-api';
 import { ProductApi } from '../products/product-api';
+import { CustomerAddressApi } from './customer-address-api';
+import { SavedCustomerAddress } from './customer-address.models';
 import { CustomerCartService } from './customer-cart.service';
 import { CustomerHomePage } from './customer-home-page';
 import { ViaCepApi } from './via-cep-api';
@@ -67,6 +69,14 @@ describe('CustomerHomePage', () => {
     listByEstablishment: jasmine.createSpy('listByEstablishment').and.returnValue(of([]))
   };
 
+  const customerAddressApiStub = {
+    listMine: jasmine.createSpy('listMine').and.returnValue(of([sampleSavedAddress()])),
+    create: jasmine.createSpy('create').and.returnValue(of(sampleSavedAddress('address-2', null, false))),
+    update: jasmine.createSpy('update').and.returnValue(of(sampleSavedAddress('address-1', 'Casa editada', true, sampleDeliveryAddress('200')))),
+    setDefault: jasmine.createSpy('setDefault').and.returnValue(of(sampleSavedAddress('address-1', 'Casa', true))),
+    delete: jasmine.createSpy('delete').and.returnValue(of(void 0))
+  };
+
   const orderApiStub = {
     create: jasmine.createSpy('create').and.callFake((request: CreateOrderRequest) => of(sampleOrder(request.deliveryAddress)))
   };
@@ -86,8 +96,19 @@ describe('CustomerHomePage', () => {
     customerCartStub.syncCatalog.calls.reset();
     establishmentApiStub.listPublic.calls.reset();
     productApiStub.listByEstablishment.calls.reset();
+    customerAddressApiStub.listMine.calls.reset();
+    customerAddressApiStub.create.calls.reset();
+    customerAddressApiStub.update.calls.reset();
+    customerAddressApiStub.setDefault.calls.reset();
+    customerAddressApiStub.delete.calls.reset();
     orderApiStub.create.calls.reset();
     viaCepApiStub.lookup.calls.reset();
+
+    customerAddressApiStub.listMine.and.returnValue(of([sampleSavedAddress()]));
+    customerAddressApiStub.create.and.returnValue(of(sampleSavedAddress('address-2', null, false)));
+    customerAddressApiStub.update.and.returnValue(of(sampleSavedAddress('address-1', 'Casa editada', true, sampleDeliveryAddress('200'))));
+    customerAddressApiStub.setDefault.and.returnValue(of(sampleSavedAddress('address-1', 'Casa', true)));
+    customerAddressApiStub.delete.and.returnValue(of(void 0));
 
     currentAccount.set({
       id: 'customer-1',
@@ -120,13 +141,50 @@ describe('CustomerHomePage', () => {
         { provide: CustomerCartService, useValue: customerCartStub },
         { provide: EstablishmentApi, useValue: establishmentApiStub },
         { provide: ProductApi, useValue: productApiStub },
+        { provide: CustomerAddressApi, useValue: customerAddressApiStub },
         { provide: OrderApi, useValue: orderApiStub },
         { provide: ViaCepApi, useValue: viaCepApiStub }
       ]
     }).compileComponents();
   });
 
-  it('autofills address fields from ViaCEP and keeps manual fields for the user', () => {
+  it('loads saved addresses and selects the default address for checkout', () => {
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    expect(customerAddressApiStub.listMine).toHaveBeenCalled();
+    expect(component.selectedAddressId()).toBe('address-1');
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('Endereco selecionado');
+    expect(compiled.textContent).toContain('Casa');
+  });
+
+  it('starts with the address section collapsed and expands on demand', () => {
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    expect(component.isAddressSectionCollapsed()).toBeTrue();
+
+    let compiled = fixture.nativeElement as HTMLElement;
+    const expandButton = compiled.querySelector('button[aria-label="Expandir enderecos"]');
+
+    expect(compiled.textContent).toContain('Endereco selecionado');
+    expect(compiled.textContent).not.toContain('Cadastrar novo endereco');
+    expect(expandButton).not.toBeNull();
+
+    component.toggleAddressSection();
+    fixture.detectChanges();
+
+    expect(component.isAddressSectionCollapsed()).toBeFalse();
+
+    compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('Cadastrar novo endereco');
+  });
+
+  it('autofills the saved address form from ViaCEP and keeps manual fields for the user', () => {
     viaCepApiStub.lookup.and.returnValue(
       of({
         zipCode: '01310930',
@@ -141,7 +199,8 @@ describe('CustomerHomePage', () => {
     fixture.detectChanges();
 
     const component = fixture.componentInstance;
-    component.checkoutForm.patchValue({
+    component.startNewAddress();
+    component.addressForm.patchValue({
       zipCode: '01310-930',
       number: '1500',
       complement: 'Apto 91'
@@ -150,8 +209,9 @@ describe('CustomerHomePage', () => {
     component.lookupZipCode();
 
     expect(viaCepApiStub.lookup).toHaveBeenCalledWith('01310930');
-    expect(component.checkoutForm.patchValue).toBeDefined();
-    expect(component.checkoutForm.getRawValue()).toEqual({
+    expect(component.addressForm.patchValue).toBeDefined();
+    expect(component.addressForm.getRawValue()).toEqual({
+      label: '',
       zipCode: '01310-930',
       street: 'Avenida Paulista',
       number: '1500',
@@ -159,26 +219,19 @@ describe('CustomerHomePage', () => {
       city: 'Sao Paulo',
       state: 'SP',
       complement: 'Apto 91',
-      paymentMethod: 'PIX',
-      changeRequired: false
+      defaultAddress: false
     });
     expect(component.zipCodeLookupMessage()).toContain('preenchidos pelo CEP');
   });
 
-  it('renders required field indicators in checkout labels', () => {
-    const fixture = TestBed.createComponent(CustomerHomePage);
-    fixture.detectChanges();
-
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelectorAll('.required-indicator')).toHaveSize(7);
-  });
-
-  it('submits the delivery address and resets the checkout form after success', () => {
+  it('creates a new saved address and selects it for the current checkout', () => {
     const fixture = TestBed.createComponent(CustomerHomePage);
     fixture.detectChanges();
 
     const component = fixture.componentInstance;
-    component.checkoutForm.setValue({
+    component.startNewAddress();
+    component.addressForm.setValue({
+      label: '',
       zipCode: '01310-930',
       street: 'Avenida Paulista',
       number: '1500',
@@ -186,6 +239,87 @@ describe('CustomerHomePage', () => {
       city: 'Sao Paulo',
       state: 'sp',
       complement: 'Apto 91',
+      defaultAddress: false
+    });
+
+    component.saveAddress();
+
+    expect(customerAddressApiStub.create).toHaveBeenCalledWith({
+      label: null,
+      zipCode: '01310930',
+      street: 'Avenida Paulista',
+      number: '1500',
+      district: 'Bela Vista',
+      city: 'Sao Paulo',
+      state: 'SP',
+      complement: 'Apto 91',
+      defaultAddress: false
+    });
+    expect(component.selectedAddressId()).toBe('address-2');
+    expect(component.savedAddresses()).toHaveSize(2);
+  });
+
+  it('edits an existing saved address without changing the selected checkout address', () => {
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.startEditAddress('address-1');
+    component.addressForm.patchValue({
+      label: 'Casa editada',
+      zipCode: '22222-000',
+      street: 'Rua das Flores',
+      number: '200',
+      district: 'Centro',
+      city: 'Rio de Janeiro',
+      state: 'rj',
+      complement: ''
+    });
+
+    component.saveAddress();
+
+    expect(customerAddressApiStub.update).toHaveBeenCalledWith('address-1', {
+      label: 'Casa editada',
+      zipCode: '22222000',
+      street: 'Rua das Flores',
+      number: '200',
+      district: 'Centro',
+      city: 'Rio de Janeiro',
+      state: 'RJ',
+      complement: null
+    });
+    expect(component.selectedAddressId()).toBe('address-1');
+    expect(component.savedAddresses()[0].label).toBe('Casa editada');
+    expect(component.savedAddresses()[0].address.number).toBe('200');
+  });
+
+  it('removes the selected address and reloads the remaining default address', () => {
+    customerAddressApiStub.listMine.and.returnValues(
+      of([
+        sampleSavedAddress('address-1', 'Casa', true),
+        sampleSavedAddress('address-2', 'Trabalho', false, sampleDeliveryAddress('250'))
+      ]),
+      of([sampleSavedAddress('address-2', 'Trabalho', true, sampleDeliveryAddress('250'))])
+    );
+
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.deleteAddress('address-1');
+
+    expect(customerAddressApiStub.delete).toHaveBeenCalledWith('address-1');
+    expect(component.savedAddresses()).toHaveSize(1);
+    expect(component.selectedAddressId()).toBe('address-2');
+    expect(component.savedAddresses()[0].defaultAddress).toBeTrue();
+  });
+
+  it('submits the selected saved address and resets the payment form after success', () => {
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.paymentForm.setValue({
       paymentMethod: 'CASH_ON_DELIVERY',
       changeRequired: true
     });
@@ -209,18 +343,37 @@ describe('CustomerHomePage', () => {
     });
     expect(customerCartStub.clear).toHaveBeenCalled();
     expect(component.lastOrder()?.deliveryAddress.city).toBe('Sao Paulo');
-    expect(component.checkoutForm.getRawValue()).toEqual({
-      zipCode: '',
-      street: '',
-      number: '',
-      district: '',
-      city: '',
-      state: '',
-      complement: '',
+    expect(component.paymentForm.getRawValue()).toEqual({
       paymentMethod: 'PIX',
       changeRequired: false
     });
   });
+
+  function sampleSavedAddress(
+    id = 'address-1',
+    label: string | null = 'Casa',
+    defaultAddress = true,
+    address: DeliveryAddress = sampleDeliveryAddress()
+  ): SavedCustomerAddress {
+    return {
+      id,
+      label,
+      defaultAddress,
+      address
+    };
+  }
+
+  function sampleDeliveryAddress(number = '1500'): DeliveryAddress {
+    return {
+      zipCode: '01310930',
+      street: 'Avenida Paulista',
+      number,
+      district: 'Bela Vista',
+      city: 'Sao Paulo',
+      state: 'SP',
+      complement: 'Apto 91'
+    };
+  }
 
   function sampleEstablishment(): Establishment {
     return {

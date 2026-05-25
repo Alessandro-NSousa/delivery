@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -21,24 +21,28 @@ import {
 } from '../orders/order.models';
 import { ProductApi } from '../products/product-api';
 import { Product, productCategoryOptions } from '../products/product.models';
+import { CustomerAddressApi } from './customer-address-api';
+import { CreateCustomerAddressRequest, SavedCustomerAddress, UpdateCustomerAddressRequest } from './customer-address.models';
 import { ViaCepApi } from './via-cep-api';
 
 const establishmentCategoryLabels = new Map(establishmentCategoryOptions.map((option) => [option.value, option.label]));
 const productCategoryLabels = new Map(productCategoryOptions.map((option) => [option.value, option.label]));
 const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const initialDeliveryAddressFormValue = {
+const initialSavedAddressFormValue = {
+  label: '',
   zipCode: '',
   street: '',
   number: '',
   district: '',
   city: '',
   state: '',
-  complement: ''
+  complement: '',
+  defaultAddress: false
 };
 
-type DeliveryAddressField = keyof typeof initialDeliveryAddressFormValue;
-type DeliveryAddressMaskedField = 'zipCode' | 'state';
+type SavedAddressFormField = 'zipCode' | 'street' | 'number' | 'district' | 'city' | 'state';
+type SavedAddressMaskedField = 'zipCode' | 'state';
 
 @Component({
   selector: 'app-customer-home-page',
@@ -344,99 +348,262 @@ type DeliveryAddressMaskedField = 'zipCode' | 'state';
                   </button>
                 </div>
 
-                <form class="checkout-form" [formGroup]="checkoutForm" (ngSubmit)="submitOrder()">
+                <form class="checkout-form" [formGroup]="paymentForm" (ngSubmit)="submitOrder()">
                   <div class="section-heading">
                     <div>
                       <p class="label">Entrega</p>
                       <h3>Endereco do pedido</h3>
                     </div>
-                    @if (canCheckout()) {
-                      <span class="city-chip">Obrigatorio para finalizar</span>
-                    }
+
+                    <div class="section-heading-actions">
+                      @if (canCheckout()) {
+                        <span class="city-chip">Obrigatorio para finalizar</span>
+                      }
+
+                      @if (canCollapseAddressSection()) {
+                        <button
+                          type="button"
+                          class="icon-button"
+                          (click)="toggleAddressSection()"
+                          [attr.aria-expanded]="!isAddressSectionCollapsed()"
+                          [attr.aria-label]="isAddressSectionCollapsed() ? 'Expandir enderecos' : 'Recolher enderecos'"
+                          [attr.title]="isAddressSectionCollapsed() ? 'Expandir enderecos' : 'Recolher enderecos'"
+                        >
+                          <span class="icon-chevron" [class.expanded]="!isAddressSectionCollapsed()" aria-hidden="true"></span>
+                        </button>
+                      }
+                    </div>
                   </div>
 
                   @if (canCheckout()) {
-                    <div class="address-grid">
-                      <label class="field">
-                        <span class="field-label">CEP <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input
-                          formControlName="zipCode"
-                          inputmode="numeric"
-                          autocomplete="postal-code"
-                          maxlength="9"
-                          placeholder="Ex.: 01310-930"
-                          (input)="applyDeliveryAddressMask('zipCode')"
-                          (blur)="lookupZipCode()"
-                        />
-                        @if (deliveryAddressFieldInvalid('zipCode')) {
-                          <small>Informe um CEP valido.</small>
-                        }
-                      </label>
-
-                      <label class="field">
-                        <span class="field-label">Rua <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input formControlName="street" autocomplete="address-line1" placeholder="Rua ou avenida" />
-                        @if (deliveryAddressFieldInvalid('street')) {
-                          <small>Informe a rua da entrega.</small>
-                        }
-                      </label>
-
-                      <label class="field">
-                        <span class="field-label">Numero <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input formControlName="number" placeholder="Numero" />
-                        @if (deliveryAddressFieldInvalid('number')) {
-                          <small>Informe o numero da entrega.</small>
-                        }
-                      </label>
-
-                      <label class="field">
-                        <span class="field-label">Bairro <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input formControlName="district" placeholder="Bairro" />
-                        @if (deliveryAddressFieldInvalid('district')) {
-                          <small>Informe o bairro da entrega.</small>
-                        }
-                      </label>
-
-                      <label class="field">
-                        <span class="field-label">Cidade <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input formControlName="city" placeholder="Cidade" />
-                        @if (deliveryAddressFieldInvalid('city')) {
-                          <small>Informe a cidade da entrega.</small>
-                        }
-                      </label>
-
-                      <label class="field">
-                        <span class="field-label">UF <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input formControlName="state" placeholder="UF" maxlength="2" (input)="applyDeliveryAddressMask('state')" />
-                        @if (deliveryAddressFieldInvalid('state')) {
-                          <small>Informe uma UF com 2 caracteres.</small>
-                        }
-                      </label>
-
-                      <label class="field full-width">
-                        <span>Complemento</span>
-                        <input formControlName="complement" placeholder="Opcional" />
-                      </label>
-                    </div>
-
-                    <p class="helper-text">
-                      Ao informar o CEP, tentamos preencher rua, bairro, cidade e UF automaticamente. Numero e complemento seguem manuais.
-                    </p>
-
-                    @if (isZipCodeLookupLoading()) {
-                      <section class="feedback info">Consultando CEP no ViaCEP...</section>
-                    } @else if (zipCodeLookupMessage()) {
+                    @if (addressFeedbackMessage()) {
                       <section
                         class="feedback"
-                        [class.error]="zipCodeLookupKind() === 'error'"
-                        [class.success]="zipCodeLookupKind() === 'success'"
+                        [class.error]="addressFeedbackKind() === 'error'"
+                        [class.success]="addressFeedbackKind() === 'success'"
+                        [class.info]="addressFeedbackKind() === 'info'"
                       >
-                        {{ zipCodeLookupMessage() }}
+                        {{ addressFeedbackMessage() }}
                       </section>
+                    }
+
+                    @if (savedAddressesErrorMessage()) {
+                      <section class="feedback error">{{ savedAddressesErrorMessage() }}</section>
+                    }
+
+                    @if (isSavedAddressesLoading()) {
+                      <section class="feedback info">Carregando seus enderecos salvos...</section>
+                    }
+
+                    @if (selectedSavedAddress(); as savedAddress) {
+                      <section class="selected-address-card">
+                        <div>
+                          <p class="label">Endereco selecionado</p>
+                          <h3>{{ formatAddressLabel(savedAddress) }}</h3>
+                          <p>{{ formatDeliveryAddress(savedAddress.address) }}</p>
+                        </div>
+
+                        @if (savedAddress.defaultAddress) {
+                          <span class="city-chip">Padrao</span>
+                        }
+                      </section>
+                    } @else if (!isSavedAddressesLoading() && !isAddressFormVisible()) {
+                      <section class="feedback info">
+                        Cadastre um endereco para continuar o checkout ou entre novamente com um perfil CUSTOMER.
+                      </section>
+                    }
+
+                    @if (!isAddressSectionCollapsed()) {
+                    @if (savedAddresses().length > 0) {
+                      <div class="saved-address-list">
+                        @for (savedAddress of savedAddresses(); track savedAddress.id) {
+                          <article class="saved-address-card" [class.active]="savedAddress.id === selectedAddressId()">
+                            <div class="saved-address-head">
+                              <div>
+                                <strong>{{ formatAddressLabel(savedAddress) }}</strong>
+                                <p>{{ formatDeliveryAddress(savedAddress.address) }}</p>
+                              </div>
+
+                              @if (savedAddress.defaultAddress) {
+                                <span class="city-chip">Padrao</span>
+                              }
+                            </div>
+
+                            <div class="saved-address-actions">
+                              <button
+                                type="button"
+                                class="secondary-button"
+                                [class.active]="savedAddress.id === selectedAddressId()"
+                                (click)="selectSavedAddress(savedAddress.id)"
+                              >
+                                {{ savedAddress.id === selectedAddressId() ? 'Selecionado para este pedido' : 'Usar neste pedido' }}
+                              </button>
+
+                              @if (!savedAddress.defaultAddress) {
+                                <button
+                                  type="button"
+                                  class="text-button"
+                                  (click)="setDefaultAddress(savedAddress.id)"
+                                  [disabled]="pendingDefaultAddressId() === savedAddress.id || pendingDeleteAddressId() === savedAddress.id"
+                                >
+                                  {{ pendingDefaultAddressId() === savedAddress.id ? 'Atualizando padrao...' : 'Definir como padrao' }}
+                                </button>
+                              }
+
+                              <button
+                                type="button"
+                                class="text-button"
+                                (click)="startEditAddress(savedAddress.id)"
+                                [disabled]="isSavingAddress() || pendingDeleteAddressId() === savedAddress.id"
+                              >
+                                Editar
+                              </button>
+
+                              <button
+                                type="button"
+                                class="text-button"
+                                (click)="deleteAddress(savedAddress.id)"
+                                [disabled]="pendingDeleteAddressId() === savedAddress.id"
+                              >
+                                {{ pendingDeleteAddressId() === savedAddress.id ? 'Removendo...' : 'Remover' }}
+                              </button>
+                            </div>
+                          </article>
+                        }
+                      </div>
+                    }
+
+                    <div class="address-toolbar">
+                      <button type="button" class="secondary-button" (click)="startNewAddress()" [disabled]="isSavingAddress()">
+                        {{ savedAddresses().length === 0 ? 'Cadastrar endereco' : 'Cadastrar novo endereco' }}
+                      </button>
+                    </div>
+
+                    @if (isAddressFormVisible()) {
+                      <div class="address-form-shell" [formGroup]="addressForm">
+                        <div class="section-heading">
+                          <div>
+                            <p class="label">{{ editingAddressId() ? 'Editar endereco' : 'Novo endereco' }}</p>
+                            <h3>{{ editingAddressId() ? 'Atualize os dados salvos' : 'Salvar para os proximos pedidos' }}</h3>
+                          </div>
+                        </div>
+
+                        <label class="field full-width">
+                          <span>Nome do endereco</span>
+                          <input formControlName="label" placeholder="Ex.: Casa, Trabalho" />
+                        </label>
+
+                        <div class="address-grid">
+                          <label class="field">
+                            <span class="field-label">CEP <span class="required-indicator" aria-hidden="true">*</span></span>
+                            <input
+                              formControlName="zipCode"
+                              inputmode="numeric"
+                              autocomplete="postal-code"
+                              maxlength="9"
+                              placeholder="Ex.: 01310-930"
+                              (input)="applyDeliveryAddressMask('zipCode')"
+                              (blur)="lookupZipCode()"
+                            />
+                            @if (deliveryAddressFieldInvalid('zipCode')) {
+                              <small>Informe um CEP valido.</small>
+                            }
+                          </label>
+
+                          <label class="field">
+                            <span class="field-label">Rua <span class="required-indicator" aria-hidden="true">*</span></span>
+                            <input formControlName="street" autocomplete="address-line1" placeholder="Rua ou avenida" />
+                            @if (deliveryAddressFieldInvalid('street')) {
+                              <small>Informe a rua da entrega.</small>
+                            }
+                          </label>
+
+                          <label class="field">
+                            <span class="field-label">Numero <span class="required-indicator" aria-hidden="true">*</span></span>
+                            <input formControlName="number" placeholder="Numero" />
+                            @if (deliveryAddressFieldInvalid('number')) {
+                              <small>Informe o numero da entrega.</small>
+                            }
+                          </label>
+
+                          <label class="field">
+                            <span class="field-label">Bairro <span class="required-indicator" aria-hidden="true">*</span></span>
+                            <input formControlName="district" placeholder="Bairro" />
+                            @if (deliveryAddressFieldInvalid('district')) {
+                              <small>Informe o bairro da entrega.</small>
+                            }
+                          </label>
+
+                          <label class="field">
+                            <span class="field-label">Cidade <span class="required-indicator" aria-hidden="true">*</span></span>
+                            <input formControlName="city" placeholder="Cidade" />
+                            @if (deliveryAddressFieldInvalid('city')) {
+                              <small>Informe a cidade da entrega.</small>
+                            }
+                          </label>
+
+                          <label class="field">
+                            <span class="field-label">UF <span class="required-indicator" aria-hidden="true">*</span></span>
+                            <input formControlName="state" placeholder="UF" maxlength="2" (input)="applyDeliveryAddressMask('state')" />
+                            @if (deliveryAddressFieldInvalid('state')) {
+                              <small>Informe uma UF com 2 caracteres.</small>
+                            }
+                          </label>
+
+                          <label class="field full-width">
+                            <span>Complemento</span>
+                            <input formControlName="complement" placeholder="Opcional" />
+                          </label>
+                        </div>
+
+                        @if (!editingAddressId()) {
+                          <label class="checkbox-row">
+                            <input type="checkbox" formControlName="defaultAddress" />
+                            <span>Definir como endereco padrao</span>
+                          </label>
+                        }
+
+                        @if (!editingAddressId() && savedAddresses().length === 0) {
+                          <p class="helper-text">O primeiro endereco salvo vira o padrao da conta automaticamente.</p>
+                        }
+
+                        <p class="helper-text">
+                          Ao informar o CEP, tentamos preencher rua, bairro, cidade e UF automaticamente. Numero e complemento seguem manuais.
+                        </p>
+
+                        @if (isZipCodeLookupLoading()) {
+                          <section class="feedback info">Consultando CEP no ViaCEP...</section>
+                        } @else if (zipCodeLookupMessage()) {
+                          <section
+                            class="feedback"
+                            [class.error]="zipCodeLookupKind() === 'error'"
+                            [class.success]="zipCodeLookupKind() === 'success'"
+                          >
+                            {{ zipCodeLookupMessage() }}
+                          </section>
+                        }
+
+                        <div class="address-form-actions">
+                          <button type="button" class="primary-link" (click)="saveAddress()" [disabled]="isSavingAddress()">
+                            {{ isSavingAddress() ? (editingAddressId() ? 'Salvando alteracoes...' : 'Salvando endereco...') : (editingAddressId() ? 'Salvar alteracoes' : 'Salvar endereco') }}
+                          </button>
+
+                          @if (savedAddresses().length > 0 || editingAddressId()) {
+                            <button type="button" class="text-button" (click)="cancelNewAddress()" [disabled]="isSavingAddress()">
+                              Cancelar
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+                    } @else if (selectedSavedAddress()) {
+                      <p class="helper-text collapsed-address-hint">
+                        Sessao recolhida. Expanda para trocar, editar ou cadastrar outro endereco.
+                      </p>
                     }
                   } @else {
                     <section class="feedback info">
-                      Entre com um perfil CUSTOMER para informar o endereco de entrega e concluir o checkout.
+                      Entre com um perfil CUSTOMER para carregar seus enderecos salvos e concluir o checkout.
                     </section>
                   }
 
@@ -482,10 +649,19 @@ type DeliveryAddressMaskedField = 'zipCode' | 'state';
                       </button>
                       <p class="checkout-hint">O checkout exige um perfil CUSTOMER para concluir o pedido.</p>
                     } @else {
-                      <button type="submit" class="primary-link" [disabled]="isSubmittingOrder() || cartHasUnavailableItems()">
+                      <button
+                        type="submit"
+                        class="primary-link"
+                        [disabled]="isSubmittingOrder() || cartHasUnavailableItems() || !selectedSavedAddress()"
+                      >
                         {{ isSubmittingOrder() ? 'Enviando pedido...' : 'Finalizar pedido' }}
                       </button>
-                      <p class="checkout-hint">O servidor recalcula preco e disponibilidade antes de confirmar.</p>
+
+                      @if (selectedSavedAddress()) {
+                        <p class="checkout-hint">O servidor recalcula preco e disponibilidade antes de confirmar.</p>
+                      } @else {
+                        <p class="checkout-hint">Selecione ou cadastre um endereco salvo para concluir o pedido.</p>
+                      }
                     }
                   </div>
                 </form>
@@ -906,6 +1082,38 @@ type DeliveryAddressMaskedField = 'zipCode' | 'state';
       padding: 0;
     }
 
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border: 1px solid rgba(23, 49, 38, 0.12);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.8);
+      color: #173126;
+      cursor: pointer;
+      transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+    }
+
+    .icon-button:hover {
+      border-color: rgba(29, 92, 70, 0.26);
+      background: #fffaf3;
+    }
+
+    .icon-chevron {
+      width: 10px;
+      height: 10px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg) translateY(-1px);
+      transition: transform 0.2s ease;
+    }
+
+    .icon-chevron.expanded {
+      transform: rotate(-135deg) translateY(-1px);
+    }
+
     .checkout-form {
       display: grid;
       gap: 16px;
@@ -925,6 +1133,47 @@ type DeliveryAddressMaskedField = 'zipCode' | 'state';
     .section-heading h3 {
       margin: 0;
       font-size: 1.2rem;
+    }
+
+    .section-heading-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .selected-address-card,
+    .saved-address-card,
+    .address-form-shell {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(255, 248, 239, 0.9);
+      border: 1px solid rgba(23, 49, 38, 0.08);
+    }
+
+    .selected-address-card,
+    .saved-address-head,
+    .saved-address-actions,
+    .address-toolbar,
+    .address-form-actions {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .saved-address-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .saved-address-card.active {
+      border-color: rgba(29, 92, 70, 0.24);
+      box-shadow: 0 12px 28px rgba(29, 92, 70, 0.08);
     }
 
     .address-grid {
@@ -979,6 +1228,10 @@ type DeliveryAddressMaskedField = 'zipCode' | 'state';
       font-size: 0.95rem;
     }
 
+    .collapsed-address-hint {
+      margin-top: -4px;
+    }
+
     small {
       color: #7a1f1f;
       font-size: 0.85rem;
@@ -1026,6 +1279,12 @@ type DeliveryAddressMaskedField = 'zipCode' | 'state';
       .item-actions,
       .cart-toolbar,
       .section-heading,
+      .section-heading-actions,
+      .selected-address-card,
+      .saved-address-head,
+      .saved-address-actions,
+      .address-toolbar,
+      .address-form-actions,
       .checkout-actions,
       .checkout-summary {
         align-items: flex-start;
@@ -1058,6 +1317,7 @@ export class CustomerHomePage {
   private readonly formBuilder = inject(FormBuilder);
   private readonly authSession = inject(AuthSessionService);
   private readonly cart = inject(CustomerCartService);
+  private readonly customerAddressApi = inject(CustomerAddressApi);
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly orderApi = inject(OrderApi);
   private readonly productApi = inject(ProductApi);
@@ -1083,9 +1343,21 @@ export class CustomerHomePage {
   readonly cartFeedbackKind = signal<'info' | 'error' | 'success'>('info');
   readonly checkoutErrorMessage = signal('');
   readonly checkoutSuccessMessage = signal('');
+  readonly savedAddresses = signal<SavedCustomerAddress[]>([]);
+  readonly selectedAddressId = signal<string | null>(null);
+  readonly savedAddressesErrorMessage = signal('');
+  readonly addressFeedbackMessage = signal('');
+  readonly addressFeedbackKind = signal<'info' | 'error' | 'success'>('info');
   readonly zipCodeLookupMessage = signal('');
   readonly zipCodeLookupKind = signal<'error' | 'success'>('success');
   readonly isZipCodeLookupLoading = signal(false);
+  readonly isSavedAddressesLoading = signal(false);
+  readonly isAddressFormVisible = signal(false);
+  readonly isAddressSectionCollapsed = signal(true);
+  readonly isSavingAddress = signal(false);
+  readonly editingAddressId = signal<string | null>(null);
+  readonly pendingDefaultAddressId = signal<string | null>(null);
+  readonly pendingDeleteAddressId = signal<string | null>(null);
   readonly isSubmittingOrder = signal(false);
   readonly lastOrder = signal<Order | null>(null);
   readonly availableProductsCount = computed(() => this.products().filter((product) => product.available).length);
@@ -1093,32 +1365,62 @@ export class CustomerHomePage {
   readonly selectedEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.selectedEstablishmentId()) ?? null
   );
+  readonly selectedSavedAddress = computed(
+    () => this.savedAddresses().find((address) => address.id === this.selectedAddressId()) ?? null
+  );
+  readonly canCollapseAddressSection = computed(() => this.savedAddresses().length > 0 && this.canCheckout());
   readonly cartEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.cartEstablishmentId()) ?? null
   );
 
-  readonly checkoutForm = this.formBuilder.nonNullable.group({
-    zipCode: [initialDeliveryAddressFormValue.zipCode, [Validators.required, Validators.pattern(zipCodePattern)]],
-    street: [initialDeliveryAddressFormValue.street, [Validators.required]],
-    number: [initialDeliveryAddressFormValue.number, [Validators.required]],
-    district: [initialDeliveryAddressFormValue.district, [Validators.required]],
-    city: [initialDeliveryAddressFormValue.city, [Validators.required]],
-    state: [initialDeliveryAddressFormValue.state, [Validators.required, Validators.pattern(stateCodePattern)]],
-    complement: [initialDeliveryAddressFormValue.complement],
-    paymentMethod: ['PIX' as OrderPaymentMethod],
+  readonly paymentForm = this.formBuilder.nonNullable.group({
+    paymentMethod: ['PIX' as OrderPaymentMethod, [Validators.required]],
     changeRequired: [{ value: false, disabled: true }]
   });
 
+  readonly addressForm = this.formBuilder.nonNullable.group({
+    label: [initialSavedAddressFormValue.label],
+    zipCode: [initialSavedAddressFormValue.zipCode, [Validators.required, Validators.pattern(zipCodePattern)]],
+    street: [initialSavedAddressFormValue.street, [Validators.required]],
+    number: [initialSavedAddressFormValue.number, [Validators.required]],
+    district: [initialSavedAddressFormValue.district, [Validators.required]],
+    city: [initialSavedAddressFormValue.city, [Validators.required]],
+    state: [initialSavedAddressFormValue.state, [Validators.required, Validators.pattern(stateCodePattern)]],
+    complement: [initialSavedAddressFormValue.complement],
+    defaultAddress: [initialSavedAddressFormValue.defaultAddress]
+  });
+
   constructor() {
-    this.checkoutForm.controls.paymentMethod.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((paymentMethod) => {
+    let lastLoadedCustomerId: string | null = null;
+
+    effect(() => {
+      const account = this.currentAccount();
+      const nextCustomerId = account?.profile === 'CUSTOMER' ? account.id : null;
+
+      if (nextCustomerId === lastLoadedCustomerId) {
+        return;
+      }
+
+      lastLoadedCustomerId = nextCustomerId;
+
+      if (!nextCustomerId) {
+        this.resetSavedAddressesState();
+        return;
+      }
+
+      this.loadSavedAddresses();
+    });
+
+    this.paymentForm.controls.paymentMethod.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((paymentMethod) => {
       this.syncChangeRequiredControl(paymentMethod);
     });
 
-    this.checkoutForm.controls.zipCode.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+    this.addressForm.controls.zipCode.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.clearZipCodeLookupFeedback();
     });
 
-    this.syncChangeRequiredControl(this.checkoutForm.controls.paymentMethod.value);
+    this.syncChangeRequiredControl(this.paymentForm.controls.paymentMethod.value);
+    this.syncDefaultAddressControl();
     this.loadEstablishments();
   }
 
@@ -1195,7 +1497,203 @@ export class CustomerHomePage {
     void this.authSession.logout('/cliente');
   }
 
-  applyDeliveryAddressMask(field: DeliveryAddressMaskedField) {
+  toggleAddressSection() {
+    if (!this.canCollapseAddressSection()) {
+      return;
+    }
+
+    this.isAddressSectionCollapsed.update((collapsed) => !collapsed);
+  }
+
+  startNewAddress() {
+    this.clearAddressFeedback();
+    this.editingAddressId.set(null);
+    this.resetAddressForm();
+    this.clearZipCodeLookupFeedback();
+    this.expandAddressSection();
+    this.isAddressFormVisible.set(true);
+  }
+
+  startEditAddress(addressId: string) {
+    const savedAddress = this.savedAddresses().find((address) => address.id === addressId);
+
+    if (!savedAddress) {
+      return;
+    }
+
+    this.clearAddressFeedback();
+    this.clearZipCodeLookupFeedback();
+    this.editingAddressId.set(addressId);
+    this.addressForm.reset({
+      label: savedAddress.label ?? '',
+      zipCode: formatZipCode(savedAddress.address.zipCode),
+      street: savedAddress.address.street,
+      number: savedAddress.address.number,
+      district: savedAddress.address.district,
+      city: savedAddress.address.city,
+      state: formatStateCode(savedAddress.address.state),
+      complement: savedAddress.address.complement ?? '',
+      defaultAddress: savedAddress.defaultAddress
+    });
+    this.syncDefaultAddressControl();
+    this.expandAddressSection();
+    this.isAddressFormVisible.set(true);
+  }
+
+  cancelNewAddress() {
+    if (this.savedAddresses().length === 0) {
+      return;
+    }
+
+    this.editingAddressId.set(null);
+    this.resetAddressForm();
+    this.clearZipCodeLookupFeedback();
+    this.isAddressFormVisible.set(false);
+  }
+
+  saveAddress() {
+    if (!this.currentAccount()) {
+      this.setAddressFeedback('Entre como cliente para salvar seus enderecos.', 'info');
+      this.loginAsCustomer();
+      return;
+    }
+
+    if (!this.canCheckout()) {
+      this.setAddressFeedback('Encerre a sessao atual e entre com um perfil CUSTOMER para salvar enderecos.', 'error');
+      return;
+    }
+
+    if (this.addressForm.invalid) {
+      this.addressForm.markAllAsTouched();
+      return;
+    }
+
+    this.isSavingAddress.set(true);
+    this.clearAddressFeedback();
+    const editingAddressId = this.editingAddressId();
+    const request$ = editingAddressId
+      ? this.customerAddressApi.update(editingAddressId, this.toUpdateCustomerAddressRequest())
+      : this.customerAddressApi.create(this.toCustomerAddressRequest());
+
+    request$
+      .pipe(
+        finalize(() => this.isSavingAddress.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (savedAddress) => {
+          if (editingAddressId) {
+            this.savedAddresses.update((addresses) =>
+              addresses.map((address) => (address.id === savedAddress.id ? savedAddress : address))
+            );
+          } else {
+            const nextAddresses = savedAddress.defaultAddress
+              ? this.savedAddresses().map((address) => ({ ...address, defaultAddress: false }))
+              : [...this.savedAddresses()];
+
+            this.savedAddresses.set([...nextAddresses, savedAddress]);
+            this.syncSelectedSavedAddress(this.savedAddresses(), savedAddress.id);
+          }
+
+          this.editingAddressId.set(null);
+          this.syncDefaultAddressControl();
+          this.resetAddressForm();
+          this.clearZipCodeLookupFeedback();
+          this.isAddressFormVisible.set(false);
+          this.checkoutErrorMessage.set('');
+          this.setAddressFeedback(
+            editingAddressId ? 'Endereco atualizado com sucesso.' : 'Endereco salvo com sucesso.',
+            'success'
+          );
+        },
+        error: (error: unknown) => {
+          this.handleAddressError(
+            error,
+            editingAddressId ? 'Nao foi possivel atualizar o endereco agora.' : 'Nao foi possivel salvar o endereco agora.'
+          );
+        }
+      });
+  }
+
+  selectSavedAddress(addressId: string) {
+    this.selectedAddressId.set(addressId);
+    this.checkoutErrorMessage.set('');
+  }
+
+  setDefaultAddress(addressId: string) {
+    if (this.pendingDefaultAddressId()) {
+      return;
+    }
+
+    this.pendingDefaultAddressId.set(addressId);
+    this.clearAddressFeedback();
+
+    this.customerAddressApi
+      .setDefault(addressId)
+      .pipe(
+        finalize(() => this.pendingDefaultAddressId.set(null)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (savedAddress) => {
+          this.savedAddresses.update((addresses) =>
+            addresses.map((currentAddress) =>
+              currentAddress.id === savedAddress.id ? savedAddress : { ...currentAddress, defaultAddress: false }
+            )
+          );
+          this.setAddressFeedback('Endereco padrao atualizado.', 'success');
+        },
+        error: (error: unknown) => {
+          this.handleAddressError(error, 'Nao foi possivel atualizar o endereco padrao agora.');
+        }
+      });
+  }
+
+  deleteAddress(addressId: string) {
+    if (this.pendingDeleteAddressId()) {
+      return;
+    }
+
+    this.pendingDeleteAddressId.set(addressId);
+    this.clearAddressFeedback();
+
+    this.customerAddressApi
+      .delete(addressId)
+      .pipe(
+        finalize(() => this.pendingDeleteAddressId.set(null)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: () => {
+          const wasEditing = this.editingAddressId() === addressId;
+
+          this.savedAddresses.update((addresses) => addresses.filter((address) => address.id !== addressId));
+          this.syncSelectedSavedAddress(this.savedAddresses());
+
+          if (wasEditing) {
+            this.editingAddressId.set(null);
+            this.resetAddressForm();
+            this.clearZipCodeLookupFeedback();
+            this.isAddressFormVisible.set(false);
+          }
+
+          if (this.savedAddresses().length === 0) {
+            this.expandAddressSection();
+            this.resetAddressForm();
+            this.isAddressFormVisible.set(true);
+          }
+
+          this.syncDefaultAddressControl();
+          this.loadSavedAddresses();
+          this.setAddressFeedback('Endereco removido com sucesso.', 'success');
+        },
+        error: (error: unknown) => {
+          this.handleAddressError(error, 'Nao foi possivel remover o endereco agora.');
+        }
+      });
+  }
+
+  applyDeliveryAddressMask(field: SavedAddressMaskedField) {
     switch (field) {
       case 'zipCode':
         this.updateDeliveryAddressMaskedField(field, formatZipCode);
@@ -1207,15 +1705,15 @@ export class CustomerHomePage {
   }
 
   isCashPaymentSelected() {
-    return this.checkoutForm.controls.paymentMethod.value === 'CASH_ON_DELIVERY';
+    return this.paymentForm.controls.paymentMethod.value === 'CASH_ON_DELIVERY';
   }
 
   paymentMethodLabel(paymentMethod: OrderPaymentMethod) {
     return paymentMethodLabels.get(paymentMethod) ?? paymentMethod;
   }
 
-  deliveryAddressFieldInvalid(field: DeliveryAddressField) {
-    const control = this.checkoutForm.controls[field];
+  deliveryAddressFieldInvalid(field: SavedAddressFormField) {
+    const control = this.addressForm.controls[field];
     return control.invalid && control.touched;
   }
 
@@ -1233,8 +1731,13 @@ export class CustomerHomePage {
     return `${streetLine} - ${address.district}, ${address.city}/${address.state}${complement}`;
   }
 
+  formatAddressLabel(address: SavedCustomerAddress) {
+    const position = this.savedAddresses().findIndex((currentAddress) => currentAddress.id === address.id) + 1;
+    return address.label?.trim() || `Endereco ${String(position).padStart(2, '0')}`;
+  }
+
   lookupZipCode() {
-    const zipCode = digitsOnly(this.checkoutForm.controls.zipCode.value);
+    const zipCode = digitsOnly(this.addressForm.controls.zipCode.value);
 
     if (!zipCode) {
       this.clearZipCodeLookupFeedback();
@@ -1242,7 +1745,7 @@ export class CustomerHomePage {
     }
 
     if (zipCode.length !== 8) {
-      this.checkoutForm.controls.zipCode.markAsTouched();
+      this.addressForm.controls.zipCode.markAsTouched();
       return;
     }
 
@@ -1265,7 +1768,7 @@ export class CustomerHomePage {
             return;
           }
 
-          this.checkoutForm.patchValue(
+          this.addressForm.patchValue(
             {
               zipCode: formatZipCode(address.zipCode),
               street: address.street,
@@ -1291,6 +1794,7 @@ export class CustomerHomePage {
 
     const establishmentId = this.cartEstablishmentId();
     const items = this.cartItems();
+    const selectedSavedAddress = this.selectedSavedAddress();
 
     if (!establishmentId || items.length === 0) {
       this.checkoutErrorMessage.set('Adicione itens a sacola antes de finalizar o pedido.');
@@ -1313,15 +1817,13 @@ export class CustomerHomePage {
       return;
     }
 
-    if (this.checkoutForm.invalid) {
-      this.checkoutForm.markAllAsTouched();
-      this.checkoutErrorMessage.set('Preencha o endereco de entrega antes de finalizar o pedido.');
+    if (!selectedSavedAddress) {
+      this.checkoutErrorMessage.set('Selecione ou cadastre um endereco de entrega antes de finalizar o pedido.');
       return;
     }
 
-    const formValue = this.checkoutForm.getRawValue();
+    const formValue = this.paymentForm.getRawValue();
     const changeRequired = formValue.paymentMethod === 'CASH_ON_DELIVERY' ? formValue.changeRequired : false;
-    const deliveryAddress = this.toDeliveryAddress();
 
     this.isSubmittingOrder.set(true);
     this.orderApi
@@ -1330,7 +1832,7 @@ export class CustomerHomePage {
         items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
         paymentMethod: formValue.paymentMethod,
         changeRequired,
-        deliveryAddress
+        deliveryAddress: selectedSavedAddress.address
       })
       .pipe(
         finalize(() => this.isSubmittingOrder.set(false)),
@@ -1344,9 +1846,7 @@ export class CustomerHomePage {
           );
           this.setCartFeedback('Pedido enviado e sacola liberada para uma nova compra.', 'success');
           this.cart.clear();
-          this.clearZipCodeLookupFeedback();
-          this.checkoutForm.reset({
-            ...initialDeliveryAddressFormValue,
+          this.paymentForm.reset({
             paymentMethod: 'PIX',
             changeRequired: false
           });
@@ -1384,10 +1884,10 @@ export class CustomerHomePage {
   }
 
   private updateDeliveryAddressMaskedField(
-    field: DeliveryAddressMaskedField,
+    field: SavedAddressMaskedField,
     formatter: (value: string) => string
   ) {
-    const control = this.checkoutForm.controls[field];
+    const control = this.addressForm.controls[field];
     const formattedValue = formatter(control.value);
 
     if (control.value !== formattedValue) {
@@ -1396,7 +1896,7 @@ export class CustomerHomePage {
   }
 
   private toDeliveryAddress(): DeliveryAddress {
-    const formValue = this.checkoutForm.getRawValue();
+    const formValue = this.addressForm.getRawValue();
 
     return {
       zipCode: digitsOnly(formValue.zipCode),
@@ -1407,6 +1907,62 @@ export class CustomerHomePage {
       state: formatStateCode(formValue.state),
       complement: formValue.complement.trim() || null
     };
+  }
+
+  private toCustomerAddressRequest(): CreateCustomerAddressRequest {
+    const formValue = this.addressForm.getRawValue();
+
+    return {
+      label: formValue.label.trim() || null,
+      ...this.toDeliveryAddress(),
+      defaultAddress: formValue.defaultAddress
+    };
+  }
+
+  private toUpdateCustomerAddressRequest(): UpdateCustomerAddressRequest {
+    const formValue = this.addressForm.getRawValue();
+
+    return {
+      label: formValue.label.trim() || null,
+      ...this.toDeliveryAddress()
+    };
+  }
+
+  private loadSavedAddresses() {
+    this.isSavedAddressesLoading.set(true);
+    this.savedAddressesErrorMessage.set('');
+
+    this.customerAddressApi
+      .listMine()
+      .pipe(
+        finalize(() => this.isSavedAddressesLoading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (savedAddresses) => {
+          this.savedAddresses.set(savedAddresses);
+          this.syncSelectedSavedAddress(savedAddresses);
+          this.syncDefaultAddressControl();
+
+          if (savedAddresses.length === 0) {
+            this.expandAddressSection();
+            this.resetAddressForm();
+            this.isAddressFormVisible.set(true);
+          }
+        },
+        error: (error: unknown) => {
+          this.savedAddressesErrorMessage.set(
+            readApiErrorMessage(error, 'Nao foi possivel carregar seus enderecos salvos agora.')
+          );
+          this.savedAddresses.set([]);
+          this.selectedAddressId.set(null);
+          this.syncDefaultAddressControl();
+
+          if (error instanceof HttpErrorResponse && error.status === 401) {
+            this.authSession.refresh().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+          }
+        }
+      });
   }
 
   private loadEstablishments() {
@@ -1430,6 +1986,24 @@ export class CustomerHomePage {
           this.isLoading.set(false);
         }
       });
+  }
+
+  private syncSelectedSavedAddress(savedAddresses: SavedCustomerAddress[], preferredAddressId?: string) {
+    if (savedAddresses.length === 0) {
+      this.selectedAddressId.set(null);
+      return;
+    }
+
+    const preferredAddress = preferredAddressId
+      ? savedAddresses.find((savedAddress) => savedAddress.id === preferredAddressId)
+      : null;
+    const currentSelection = this.selectedAddressId();
+    const currentSelectedAddress = currentSelection
+      ? savedAddresses.find((savedAddress) => savedAddress.id === currentSelection)
+      : null;
+    const defaultAddress = savedAddresses.find((savedAddress) => savedAddress.defaultAddress) ?? savedAddresses[0];
+
+    this.selectedAddressId.set(preferredAddress?.id ?? currentSelectedAddress?.id ?? defaultAddress.id);
   }
 
   private loadProducts(establishmentId: string) {
@@ -1501,12 +2075,17 @@ export class CustomerHomePage {
     this.lastOrder.set(null);
   }
 
+  private clearAddressFeedback() {
+    this.addressFeedbackMessage.set('');
+    this.addressFeedbackKind.set('info');
+  }
+
   private clearZipCodeLookupFeedback() {
     this.zipCodeLookupMessage.set('');
   }
 
   private syncChangeRequiredControl(paymentMethod: OrderPaymentMethod) {
-    const changeRequiredControl = this.checkoutForm.controls.changeRequired;
+    const changeRequiredControl = this.paymentForm.controls.changeRequired;
 
     if (paymentMethod === 'CASH_ON_DELIVERY') {
       changeRequiredControl.enable({ emitEvent: false });
@@ -1520,8 +2099,67 @@ export class CustomerHomePage {
     changeRequiredControl.disable({ emitEvent: false });
   }
 
+  private syncDefaultAddressControl() {
+    const defaultAddressControl = this.addressForm.controls.defaultAddress;
+    const shouldDisable = this.savedAddresses().length === 0 || (this.editingAddressId() !== null && this.savedAddresses().length === 1);
+
+    if (shouldDisable) {
+      defaultAddressControl.setValue(true, { emitEvent: false });
+      defaultAddressControl.disable({ emitEvent: false });
+      return;
+    }
+
+    if (defaultAddressControl.disabled) {
+      defaultAddressControl.enable({ emitEvent: false });
+    }
+  }
+
+  private resetAddressForm() {
+    this.editingAddressId.set(null);
+    this.addressForm.reset({
+      ...initialSavedAddressFormValue,
+      defaultAddress: this.savedAddresses().length === 0
+    });
+    this.syncDefaultAddressControl();
+  }
+
+  private resetSavedAddressesState() {
+    this.savedAddresses.set([]);
+    this.selectedAddressId.set(null);
+    this.savedAddressesErrorMessage.set('');
+    this.isSavedAddressesLoading.set(false);
+    this.isAddressFormVisible.set(false);
+    this.isAddressSectionCollapsed.set(true);
+    this.isSavingAddress.set(false);
+    this.editingAddressId.set(null);
+    this.pendingDefaultAddressId.set(null);
+    this.pendingDeleteAddressId.set(null);
+    this.clearAddressFeedback();
+    this.clearZipCodeLookupFeedback();
+    this.resetAddressForm();
+  }
+
+  private handleAddressError(error: unknown, fallbackMessage: string) {
+    this.setAddressFeedback(readApiErrorMessage(error, fallbackMessage), 'error');
+
+    if (error instanceof HttpErrorResponse && error.status === 401) {
+      this.authSession.refresh().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+    }
+  }
+
+  private expandAddressSection() {
+    if (this.isAddressSectionCollapsed()) {
+      this.isAddressSectionCollapsed.set(false);
+    }
+  }
+
   private setCartFeedback(message: string, kind: 'info' | 'error' | 'success') {
     this.cartFeedbackMessage.set(message);
     this.cartFeedbackKind.set(kind);
+  }
+
+  private setAddressFeedback(message: string, kind: 'info' | 'error' | 'success') {
+    this.addressFeedbackMessage.set(message);
+    this.addressFeedbackKind.set(kind);
   }
 }
