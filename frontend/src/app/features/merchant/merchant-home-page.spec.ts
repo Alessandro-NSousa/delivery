@@ -143,7 +143,7 @@ describe('MerchantHomePage', () => {
       email: '',
       category: 'RESTAURANT',
       openingHours: 'Seg-Dom 18:00-23:00',
-      zipCode: '01310930',
+      zipCode: '01310-930',
       street: 'Avenida Paulista',
       number: '1500',
       district: 'Bela Vista',
@@ -152,6 +152,50 @@ describe('MerchantHomePage', () => {
       complement: 'Loja 12'
     });
     expect(component.zipCodeLookupMessage()).toContain('preenchidos pelo CEP');
+  });
+
+  it('submits masked establishment fields with sanitized payload', () => {
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.establishmentForm.setValue({
+      tradeName: 'Lanche Bom',
+      corporateName: 'Lanche Bom LTDA',
+      cnpj: '12.345.678/0001-90',
+      phone: '(11) 99999-9999',
+      email: 'contato@lanchebom.com',
+      category: 'SNACK_BAR',
+      openingHours: 'Seg-Dom 18:00-23:30',
+      zipCode: '01001-000',
+      street: 'Rua A',
+      number: '10',
+      district: 'Centro',
+      city: 'Sao Paulo',
+      state: 'sp',
+      complement: 'Loja 1'
+    });
+
+    component.submitEstablishment();
+
+    expect(establishmentApiStub.create).toHaveBeenCalledWith({
+      tradeName: 'Lanche Bom',
+      corporateName: 'Lanche Bom LTDA',
+      cnpj: '12345678000190',
+      phone: '11999999999',
+      email: 'contato@lanchebom.com',
+      category: 'SNACK_BAR',
+      openingHours: 'Seg-Dom 18:00-23:30',
+      address: {
+        zipCode: '01001000',
+        street: 'Rua A',
+        number: '10',
+        district: 'Centro',
+        city: 'Sao Paulo',
+        state: 'SP',
+        complement: 'Loja 1'
+      }
+    });
   });
 
   it('renders required field indicators in establishment address labels', () => {

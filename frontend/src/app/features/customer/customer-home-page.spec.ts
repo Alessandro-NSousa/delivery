@@ -152,7 +152,7 @@ describe('CustomerHomePage', () => {
     expect(viaCepApiStub.lookup).toHaveBeenCalledWith('01310930');
     expect(component.checkoutForm.patchValue).toBeDefined();
     expect(component.checkoutForm.getRawValue()).toEqual({
-      zipCode: '01310930',
+      zipCode: '01310-930',
       street: 'Avenida Paulista',
       number: '1500',
       district: 'Bela Vista',
@@ -179,7 +179,7 @@ describe('CustomerHomePage', () => {
 
     const component = fixture.componentInstance;
     component.checkoutForm.setValue({
-      zipCode: '01310930',
+      zipCode: '01310-930',
       street: 'Avenida Paulista',
       number: '1500',
       district: 'Bela Vista',
