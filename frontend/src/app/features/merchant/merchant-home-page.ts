@@ -4,6 +4,17 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
+import {
+  cnpjPattern,
+  digitsOnly,
+  formatCnpj,
+  formatPhoneNumber,
+  formatStateCode,
+  formatZipCode,
+  phonePattern,
+  stateCodePattern,
+  zipCodePattern
+} from '../../form-input-masks';
 import { AuthSessionService } from '../account/auth-session.service';
 import { CurrentAccount } from '../account/current-account.models';
 import { readApiErrorMessage } from '../establishments/api-error';
@@ -59,10 +70,10 @@ const productCategoryLabels = new Map(productCategoryOptions.map((option) => [op
 const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-const zipCodePattern = /^\d{5}-?\d{3}$/;
 
 type EstablishmentFormField = keyof typeof initialEstablishmentFormValue;
 type ProductFormField = keyof typeof initialProductFormValue;
+type EstablishmentMaskedField = 'cnpj' | 'phone' | 'zipCode' | 'state';
 
 @Component({
   selector: 'app-merchant-home-page',
@@ -172,17 +183,30 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
                 <label>
                   <span>CNPJ</span>
-                  <input formControlName="cnpj" inputmode="numeric" placeholder="Somente 14 digitos" />
+                  <input
+                    formControlName="cnpj"
+                    inputmode="numeric"
+                    maxlength="18"
+                    placeholder="Ex.: 12.345.678/0001-90"
+                    (input)="applyEstablishmentMask('cnpj')"
+                  />
                   @if (establishmentFieldInvalid('cnpj')) {
-                    <small>Informe um CNPJ com 14 digitos.</small>
+                    <small>Informe um CNPJ valido.</small>
                   }
                 </label>
 
                 <label>
                   <span>Telefone</span>
-                  <input formControlName="phone" placeholder="Ex.: 11999999999" />
+                  <input
+                    formControlName="phone"
+                    inputmode="tel"
+                    autocomplete="tel-national"
+                    maxlength="15"
+                    placeholder="Ex.: (11) 99999-9999"
+                    (input)="applyEstablishmentMask('phone')"
+                  />
                   @if (establishmentFieldInvalid('phone')) {
-                    <small>Informe um telefone para contato.</small>
+                    <small>Informe um telefone com DDD.</small>
                   }
                 </label>
 
@@ -225,8 +249,10 @@ type ProductFormField = keyof typeof initialProductFormValue;
                   <input
                     formControlName="zipCode"
                     inputmode="numeric"
+                    autocomplete="postal-code"
                     maxlength="9"
                     placeholder="Ex.: 01310-930"
+                    (input)="applyEstablishmentMask('zipCode')"
                     (blur)="lookupZipCode()"
                   />
                   @if (establishmentFieldInvalid('zipCode')) {
@@ -268,7 +294,7 @@ type ProductFormField = keyof typeof initialProductFormValue;
 
                 <label>
                   <span class="field-label">UF <span class="required-indicator" aria-hidden="true">*</span></span>
-                  <input formControlName="state" maxlength="2" placeholder="SP" />
+                  <input formControlName="state" maxlength="2" placeholder="SP" (input)="applyEstablishmentMask('state')" />
                   @if (establishmentFieldInvalid('state')) {
                     <small>Informe a UF com 2 letras.</small>
                   }
@@ -1007,8 +1033,8 @@ export class MerchantHomePage {
   readonly establishmentForm = this.formBuilder.nonNullable.group({
     tradeName: [initialEstablishmentFormValue.tradeName, [Validators.required]],
     corporateName: [initialEstablishmentFormValue.corporateName, [Validators.required]],
-    cnpj: [initialEstablishmentFormValue.cnpj, [Validators.required, Validators.pattern(/^\d{14}$/)]],
-    phone: [initialEstablishmentFormValue.phone, [Validators.required]],
+    cnpj: [initialEstablishmentFormValue.cnpj, [Validators.required, Validators.pattern(cnpjPattern)]],
+    phone: [initialEstablishmentFormValue.phone, [Validators.required, Validators.pattern(phonePattern)]],
     email: [initialEstablishmentFormValue.email, [Validators.required, Validators.email]],
     category: [initialEstablishmentFormValue.category, [Validators.required]],
     openingHours: [initialEstablishmentFormValue.openingHours, [Validators.required]],
@@ -1017,7 +1043,7 @@ export class MerchantHomePage {
     number: [initialEstablishmentFormValue.number, [Validators.required]],
     district: [initialEstablishmentFormValue.district, [Validators.required]],
     city: [initialEstablishmentFormValue.city, [Validators.required]],
-    state: [initialEstablishmentFormValue.state, [Validators.required, Validators.minLength(2), Validators.maxLength(2)]],
+    state: [initialEstablishmentFormValue.state, [Validators.required, Validators.pattern(stateCodePattern)]],
     complement: [initialEstablishmentFormValue.complement]
   });
 
@@ -1048,6 +1074,23 @@ export class MerchantHomePage {
 
   logout() {
     void this.authSession.logout();
+  }
+
+  applyEstablishmentMask(field: EstablishmentMaskedField) {
+    switch (field) {
+      case 'cnpj':
+        this.updateEstablishmentMaskedField(field, formatCnpj);
+        return;
+      case 'phone':
+        this.updateEstablishmentMaskedField(field, formatPhoneNumber);
+        return;
+      case 'zipCode':
+        this.updateEstablishmentMaskedField(field, formatZipCode);
+        return;
+      case 'state':
+        this.updateEstablishmentMaskedField(field, formatStateCode);
+        return;
+    }
   }
 
   submitEstablishment() {
@@ -1171,11 +1214,11 @@ export class MerchantHomePage {
 
           this.establishmentForm.patchValue(
             {
-              zipCode: address.zipCode,
+              zipCode: formatZipCode(address.zipCode),
               street: address.street,
               district: address.district,
               city: address.city,
-              state: address.state
+              state: formatStateCode(address.state)
             },
             { emitEvent: false }
           );
@@ -1404,6 +1447,18 @@ export class MerchantHomePage {
     this.orderErrorMessage.set('');
   }
 
+  private updateEstablishmentMaskedField(
+    field: EstablishmentMaskedField,
+    formatter: (value: string) => string
+  ) {
+    const control = this.establishmentForm.controls[field];
+    const formattedValue = formatter(control.value);
+
+    if (control.value !== formattedValue) {
+      control.setValue(formattedValue, { emitEvent: false });
+    }
+  }
+
   private toEstablishmentRequest(): CreateEstablishmentRequest {
     const value = this.establishmentForm.getRawValue();
 
@@ -1411,7 +1466,7 @@ export class MerchantHomePage {
       tradeName: value.tradeName.trim(),
       corporateName: value.corporateName.trim(),
       cnpj: digitsOnly(value.cnpj),
-      phone: value.phone.trim(),
+      phone: digitsOnly(value.phone),
       email: value.email.trim(),
       category: value.category,
       openingHours: value.openingHours.trim(),
@@ -1421,7 +1476,7 @@ export class MerchantHomePage {
         number: value.number.trim(),
         district: value.district.trim(),
         city: value.city.trim(),
-        state: value.state.trim().toUpperCase(),
+        state: formatStateCode(value.state),
         complement: value.complement.trim() || null
       }
     };
@@ -1439,8 +1494,4 @@ export class MerchantHomePage {
       available: value.available
     };
   }
-}
-
-function digitsOnly(value: string) {
-  return value.replace(/\D/g, '');
 }

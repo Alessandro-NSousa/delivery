@@ -5,6 +5,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
+import { digitsOnly, formatStateCode, formatZipCode, stateCodePattern, zipCodePattern } from '../../form-input-masks';
 import { AuthSessionService } from '../account/auth-session.service';
 import { CustomerCartService } from './customer-cart.service';
 import { readApiErrorMessage } from '../establishments/api-error';
@@ -26,7 +27,6 @@ const establishmentCategoryLabels = new Map(establishmentCategoryOptions.map((op
 const productCategoryLabels = new Map(productCategoryOptions.map((option) => [option.value, option.label]));
 const paymentMethodLabels = new Map(paymentMethodOptions.map((option) => [option.value, option.label]));
 const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const zipCodePattern = /^\d{5}-?\d{3}$/;
 const initialDeliveryAddressFormValue = {
   zipCode: '',
   street: '',
@@ -38,10 +38,7 @@ const initialDeliveryAddressFormValue = {
 };
 
 type DeliveryAddressField = keyof typeof initialDeliveryAddressFormValue;
-
-function digitsOnly(value: string) {
-  return value.replace(/\D/g, '');
-}
+type DeliveryAddressMaskedField = 'zipCode' | 'state';
 
 @Component({
   selector: 'app-customer-home-page',
@@ -368,6 +365,7 @@ function digitsOnly(value: string) {
                           autocomplete="postal-code"
                           maxlength="9"
                           placeholder="Ex.: 01310-930"
+                          (input)="applyDeliveryAddressMask('zipCode')"
                           (blur)="lookupZipCode()"
                         />
                         @if (deliveryAddressFieldInvalid('zipCode')) {
@@ -409,7 +407,7 @@ function digitsOnly(value: string) {
 
                       <label class="field">
                         <span class="field-label">UF <span class="required-indicator" aria-hidden="true">*</span></span>
-                        <input formControlName="state" placeholder="UF" maxlength="2" />
+                        <input formControlName="state" placeholder="UF" maxlength="2" (input)="applyDeliveryAddressMask('state')" />
                         @if (deliveryAddressFieldInvalid('state')) {
                           <small>Informe uma UF com 2 caracteres.</small>
                         }
@@ -1105,7 +1103,7 @@ export class CustomerHomePage {
     number: [initialDeliveryAddressFormValue.number, [Validators.required]],
     district: [initialDeliveryAddressFormValue.district, [Validators.required]],
     city: [initialDeliveryAddressFormValue.city, [Validators.required]],
-    state: [initialDeliveryAddressFormValue.state, [Validators.required, Validators.minLength(2), Validators.maxLength(2)]],
+    state: [initialDeliveryAddressFormValue.state, [Validators.required, Validators.pattern(stateCodePattern)]],
     complement: [initialDeliveryAddressFormValue.complement],
     paymentMethod: ['PIX' as OrderPaymentMethod],
     changeRequired: [{ value: false, disabled: true }]
@@ -1197,6 +1195,17 @@ export class CustomerHomePage {
     void this.authSession.logout('/cliente');
   }
 
+  applyDeliveryAddressMask(field: DeliveryAddressMaskedField) {
+    switch (field) {
+      case 'zipCode':
+        this.updateDeliveryAddressMaskedField(field, formatZipCode);
+        return;
+      case 'state':
+        this.updateDeliveryAddressMaskedField(field, formatStateCode);
+        return;
+    }
+  }
+
   isCashPaymentSelected() {
     return this.checkoutForm.controls.paymentMethod.value === 'CASH_ON_DELIVERY';
   }
@@ -1258,11 +1267,11 @@ export class CustomerHomePage {
 
           this.checkoutForm.patchValue(
             {
-              zipCode: address.zipCode,
+              zipCode: formatZipCode(address.zipCode),
               street: address.street,
               district: address.district,
               city: address.city,
-              state: address.state
+              state: formatStateCode(address.state)
             },
             { emitEvent: false }
           );
@@ -1374,6 +1383,18 @@ export class CustomerHomePage {
     return brlFormatter.format(price);
   }
 
+  private updateDeliveryAddressMaskedField(
+    field: DeliveryAddressMaskedField,
+    formatter: (value: string) => string
+  ) {
+    const control = this.checkoutForm.controls[field];
+    const formattedValue = formatter(control.value);
+
+    if (control.value !== formattedValue) {
+      control.setValue(formattedValue, { emitEvent: false });
+    }
+  }
+
   private toDeliveryAddress(): DeliveryAddress {
     const formValue = this.checkoutForm.getRawValue();
 
@@ -1383,7 +1404,7 @@ export class CustomerHomePage {
       number: formValue.number.trim(),
       district: formValue.district.trim(),
       city: formValue.city.trim(),
-      state: formValue.state.trim().toUpperCase(),
+      state: formatStateCode(formValue.state),
       complement: formValue.complement.trim() || null
     };
   }
