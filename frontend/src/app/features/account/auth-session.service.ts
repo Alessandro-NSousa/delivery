@@ -3,6 +3,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { finalize, from, map, tap } from 'rxjs';
 
+import { FeedbackModalService } from '../../app-feedback-modal.service';
 import { AccountProfile, CurrentAccount } from './current-account.models';
 
 const loginIntentStorageKey = 'delivery.auth.login-intent';
@@ -16,6 +17,7 @@ interface LoginIntent {
 export class AuthSessionService {
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
+  private readonly feedbackModal = inject(FeedbackModalService);
 
   readonly currentAccount = signal<CurrentAccount | null>(null);
   readonly isLoading = signal(false);
@@ -58,7 +60,8 @@ export class AuthSessionService {
       if (account.profile !== profile) {
         this.setFeedback(
           `Sua sessao atual esta com perfil ${account.profile}. Encerre a sessao e entre com a conta esperada para acessar a area de ${this.profileLabel(profile)}.`,
-          'error'
+          'error',
+          true
         );
         void this.router.navigateByUrl(this.defaultRedirectPath(account.profile));
         return;
@@ -97,9 +100,10 @@ export class AuthSessionService {
       }
 
       this.currentAccount.set(null);
+      this.feedbackModal.showSuccess('Sessao encerrada com sucesso.');
       void this.router.navigateByUrl(redirectPath);
     } catch {
-      this.setFeedback('Nao foi possivel encerrar a sessao agora.', 'error');
+      this.setFeedback('Nao foi possivel encerrar a sessao agora.', 'error', true);
     } finally {
       this.isLoading.set(false);
     }
@@ -120,7 +124,8 @@ export class AuthSessionService {
     if (account.profile !== intent.profile) {
       this.setFeedback(
         `A autenticacao retornou com perfil ${account.profile}. O backend define o perfil ativo da sessao; voce foi redirecionado para a area compativel.`,
-        'error'
+        'error',
+        true
       );
       void this.router.navigateByUrl(this.defaultRedirectPath(account.profile));
       return;
@@ -245,8 +250,12 @@ export class AuthSessionService {
     this.document.defaultView?.sessionStorage.removeItem(loginIntentStorageKey);
   }
 
-  private setFeedback(message: string, kind: 'info' | 'error') {
+  private setFeedback(message: string, kind: 'info' | 'error', announce = false) {
     this.feedbackMessage.set(message);
     this.feedbackKind.set(kind);
+
+    if (announce && kind === 'error') {
+      this.feedbackModal.showError();
+    }
   }
 }

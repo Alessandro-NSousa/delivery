@@ -2,6 +2,7 @@ import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 
+import { FeedbackModalService } from '../../app-feedback-modal.service';
 import { AuthSessionService } from '../account/auth-session.service';
 import { readApiErrorMessage } from '../establishments/api-error';
 import { EstablishmentApi } from '../establishments/establishment-api';
@@ -535,6 +536,7 @@ const brlFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currenc
 })
 export class HomePage {
   private readonly authSession = inject(AuthSessionService);
+  private readonly feedbackModal = inject(FeedbackModalService);
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly productApi = inject(ProductApi);
   private readonly destroyRef = inject(DestroyRef);
@@ -630,6 +632,7 @@ export class HomePage {
           this.errorMessage.set(
             readApiErrorMessage(error, 'Nao foi possivel carregar os dados publicos agora. Confirme se o backend local esta ativo.')
           );
+          this.feedbackModal.showError();
           this.establishments.set([]);
           this.selectedEstablishmentId.set(null);
           this.products.set([]);
@@ -654,6 +657,7 @@ export class HomePage {
           this.productErrorMessage.set(
             readApiErrorMessage(error, 'Nao foi possivel carregar o cardapio desta loja agora.')
           );
+          this.feedbackModal.showError();
           this.products.set([]);
           this.areProductsLoading.set(false);
         }
