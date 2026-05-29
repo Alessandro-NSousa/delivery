@@ -4,6 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
+import { FeedbackModalService } from '../../app-feedback-modal.service';
 import {
   cnpjPattern,
   digitsOnly,
@@ -991,6 +992,7 @@ type EstablishmentMaskedField = 'cnpj' | 'phone' | 'zipCode' | 'state';
 })
 export class MerchantHomePage {
   private readonly formBuilder = inject(FormBuilder);
+  private readonly feedbackModal = inject(FeedbackModalService);
   private readonly authSession = inject(AuthSessionService);
   private readonly establishmentApi = inject(EstablishmentApi);
   private readonly orderApi = inject(OrderApi);
@@ -1095,7 +1097,7 @@ export class MerchantHomePage {
 
   submitEstablishment() {
     if (!this.canManageCatalog()) {
-      this.establishmentErrorMessage.set('Entre com uma conta de lojista para cadastrar estabelecimentos.');
+      this.setEstablishmentError('Entre com uma conta de lojista para cadastrar estabelecimentos.');
       return;
     }
 
@@ -1116,24 +1118,20 @@ export class MerchantHomePage {
       )
       .subscribe({
         next: (establishment) => {
-          this.establishmentSuccessMessage.set(
-            `${establishment.tradeName} cadastrado com sucesso e pronto para receber produtos.`
-          );
+          this.setEstablishmentSuccess(`${establishment.tradeName} cadastrado com sucesso e pronto para receber produtos.`);
           this.establishmentForm.reset(initialEstablishmentFormValue);
           this.clearZipCodeLookupFeedback();
           this.loadEstablishments(establishment.id);
         },
         error: (error: unknown) => {
-          this.establishmentErrorMessage.set(
-            readApiErrorMessage(error, 'Nao foi possivel cadastrar o estabelecimento agora.')
-          );
+          this.setEstablishmentError(readApiErrorMessage(error, 'Nao foi possivel cadastrar o estabelecimento agora.'));
         }
       });
   }
 
   submitProduct() {
     if (!this.canManageCatalog()) {
-      this.productErrorMessage.set('Entre com uma conta de lojista para publicar produtos.');
+      this.setProductError('Entre com uma conta de lojista para publicar produtos.');
       return;
     }
 
@@ -1144,7 +1142,7 @@ export class MerchantHomePage {
 
     const establishmentId = this.selectedEstablishmentId();
     if (!establishmentId) {
-      this.productErrorMessage.set('Selecione um estabelecimento para publicar o produto.');
+      this.setProductError('Selecione um estabelecimento para publicar o produto.');
       return;
     }
 
@@ -1160,12 +1158,12 @@ export class MerchantHomePage {
       )
       .subscribe({
         next: (product) => {
-          this.productSuccessMessage.set(`${product.name} publicado com sucesso no cardapio.`);
+          this.setProductSuccess(`${product.name} publicado com sucesso no cardapio.`);
           this.productForm.reset(initialProductFormValue);
           this.loadProducts(establishmentId);
         },
         error: (error: unknown) => {
-          this.productErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel publicar o produto agora.'));
+          this.setProductError(readApiErrorMessage(error, 'Nao foi possivel publicar o produto agora.'));
         }
       });
   }
@@ -1250,13 +1248,13 @@ export class MerchantHomePage {
       )
       .subscribe({
         next: (updatedOrder) => {
-          this.orderSuccessMessage.set(
+          this.setOrderSuccess(
             `Pedido #${this.shortOrderId(updatedOrder.id)} atualizado para ${this.orderStatusLabel(updatedOrder.status)}.`
           );
           this.orders.update((orders) => orders.map((item) => (item.id === updatedOrder.id ? updatedOrder : item)));
         },
         error: (error: unknown) => {
-          this.orderErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel atualizar o status do pedido agora.'));
+          this.setOrderError(readApiErrorMessage(error, 'Nao foi possivel atualizar o status do pedido agora.'));
         }
       });
   }
@@ -1362,6 +1360,7 @@ export class MerchantHomePage {
         error: (error: unknown) => {
           const message = readApiErrorMessage(error, 'Nao foi possivel carregar os estabelecimentos da conta.');
           this.catalogErrorMessage.set(message);
+          this.feedbackModal.showError();
           this.establishments.set([]);
           this.selectedEstablishmentId.set(null);
           this.products.set([]);
@@ -1386,6 +1385,7 @@ export class MerchantHomePage {
         },
         error: (error: unknown) => {
           this.catalogErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar o cardapio agora.'));
+          this.feedbackModal.showError();
           this.products.set([]);
         }
       });
@@ -1407,6 +1407,7 @@ export class MerchantHomePage {
         },
         error: (error: unknown) => {
           this.ordersErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar os pedidos recebidos agora.'));
+          this.feedbackModal.showError();
           this.orders.set([]);
         }
       });
@@ -1445,6 +1446,36 @@ export class MerchantHomePage {
   private clearOrderFeedback() {
     this.orderSuccessMessage.set('');
     this.orderErrorMessage.set('');
+  }
+
+  private setEstablishmentSuccess(message: string) {
+    this.establishmentSuccessMessage.set(message);
+    this.feedbackModal.showSuccess(message);
+  }
+
+  private setEstablishmentError(message: string) {
+    this.establishmentErrorMessage.set(message);
+    this.feedbackModal.showError();
+  }
+
+  private setProductSuccess(message: string) {
+    this.productSuccessMessage.set(message);
+    this.feedbackModal.showSuccess(message);
+  }
+
+  private setProductError(message: string) {
+    this.productErrorMessage.set(message);
+    this.feedbackModal.showError();
+  }
+
+  private setOrderSuccess(message: string) {
+    this.orderSuccessMessage.set(message);
+    this.feedbackModal.showSuccess(message);
+  }
+
+  private setOrderError(message: string) {
+    this.orderErrorMessage.set(message);
+    this.feedbackModal.showError();
   }
 
   private updateEstablishmentMaskedField(
