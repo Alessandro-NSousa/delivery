@@ -5,6 +5,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
+import { FeedbackModalService } from '../../app-feedback-modal.service';
 import { digitsOnly, formatStateCode, formatZipCode, stateCodePattern, zipCodePattern } from '../../form-input-masks';
 import { AuthSessionService } from '../account/auth-session.service';
 import { CustomerCartService } from './customer-cart.service';
@@ -1315,6 +1316,7 @@ type SavedAddressMaskedField = 'zipCode' | 'state';
 })
 export class CustomerHomePage {
   private readonly formBuilder = inject(FormBuilder);
+  private readonly feedbackModal = inject(FeedbackModalService);
   private readonly authSession = inject(AuthSessionService);
   private readonly cart = inject(CustomerCartService);
   private readonly customerAddressApi = inject(CustomerAddressApi);
@@ -1467,18 +1469,19 @@ export class CustomerHomePage {
   updateCartItemQuantity(productId: string, quantity: number) {
     this.clearOrderFeedback();
     this.cart.setQuantity(productId, quantity);
+    this.setCartFeedback('Quantidade atualizada na sacola.', 'success');
   }
 
   removeCartItem(productId: string) {
     this.clearOrderFeedback();
     this.cart.removeItem(productId);
-    this.setCartFeedback('Item removido da sacola.', 'info');
+    this.setCartFeedback('Item removido da sacola.', 'success');
   }
 
   clearCart() {
     this.clearOrderFeedback();
     this.cart.clear();
-    this.setCartFeedback('Sacola limpa.', 'info');
+    this.setCartFeedback('Sacola limpa.', 'success');
   }
 
   focusCartEstablishment() {
@@ -1553,7 +1556,7 @@ export class CustomerHomePage {
 
   saveAddress() {
     if (!this.currentAccount()) {
-      this.setAddressFeedback('Entre como cliente para salvar seus enderecos.', 'info');
+      this.setAddressFeedback('Entre como cliente para salvar seus enderecos.', 'error');
       this.loginAsCustomer();
       return;
     }
@@ -1797,28 +1800,28 @@ export class CustomerHomePage {
     const selectedSavedAddress = this.selectedSavedAddress();
 
     if (!establishmentId || items.length === 0) {
-      this.checkoutErrorMessage.set('Adicione itens a sacola antes de finalizar o pedido.');
+      this.setCheckoutErrorMessage('Adicione itens a sacola antes de finalizar o pedido.');
       return;
     }
 
     if (this.cartHasUnavailableItems()) {
-      this.checkoutErrorMessage.set('Remova os itens indisponiveis da sacola antes de finalizar.');
+      this.setCheckoutErrorMessage('Remova os itens indisponiveis da sacola antes de finalizar.');
       return;
     }
 
     if (!this.currentAccount()) {
-      this.setCartFeedback('Entre como cliente para concluir o checkout.', 'info');
+      this.setCartFeedback('Entre como cliente para concluir o checkout.', 'error');
       this.loginAsCustomer();
       return;
     }
 
     if (!this.canCheckout()) {
-      this.checkoutErrorMessage.set('Encerre a sessao atual e entre com um perfil CUSTOMER para finalizar o pedido.');
+      this.setCheckoutErrorMessage('Encerre a sessao atual e entre com um perfil CUSTOMER para finalizar o pedido.');
       return;
     }
 
     if (!selectedSavedAddress) {
-      this.checkoutErrorMessage.set('Selecione ou cadastre um endereco de entrega antes de finalizar o pedido.');
+      this.setCheckoutErrorMessage('Selecione ou cadastre um endereco de entrega antes de finalizar o pedido.');
       return;
     }
 
@@ -1841,10 +1844,10 @@ export class CustomerHomePage {
       .subscribe({
         next: (order) => {
           this.lastOrder.set(order);
-          this.checkoutSuccessMessage.set(
+          this.setCheckoutSuccessMessage(
             `Pedido #${this.shortOrderId(order.id)} enviado com sucesso para ${this.formatDeliveryAddress(order.deliveryAddress)}. Total confirmado: ${this.formatPrice(order.totalAmount)}.`
           );
-          this.setCartFeedback('Pedido enviado e sacola liberada para uma nova compra.', 'success');
+          this.setCartFeedback('Pedido enviado e sacola liberada para uma nova compra.', 'success', false);
           this.cart.clear();
           this.paymentForm.reset({
             paymentMethod: 'PIX',
@@ -1853,7 +1856,7 @@ export class CustomerHomePage {
           this.syncChangeRequiredControl('PIX');
         },
         error: (error: unknown) => {
-          this.checkoutErrorMessage.set(this.readCheckoutErrorMessage(error));
+          this.setCheckoutErrorMessage(this.readCheckoutErrorMessage(error));
 
           if (error instanceof HttpErrorResponse && error.status === 401) {
             this.authSession.refresh().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
@@ -1954,6 +1957,7 @@ export class CustomerHomePage {
           this.savedAddressesErrorMessage.set(
             readApiErrorMessage(error, 'Nao foi possivel carregar seus enderecos salvos agora.')
           );
+          this.feedbackModal.showError();
           this.savedAddresses.set([]);
           this.selectedAddressId.set(null);
           this.syncDefaultAddressControl();
@@ -1980,6 +1984,7 @@ export class CustomerHomePage {
         },
         error: (error: unknown) => {
           this.errorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar os estabelecimentos agora.'));
+          this.feedbackModal.showError();
           this.establishments.set([]);
           this.selectedEstablishmentId.set(null);
           this.products.set([]);
@@ -2021,6 +2026,7 @@ export class CustomerHomePage {
         },
         error: (error: unknown) => {
           this.productErrorMessage.set(readApiErrorMessage(error, 'Nao foi possivel carregar o cardapio agora.'));
+          this.feedbackModal.showError();
           this.products.set([]);
           this.areProductsLoading.set(false);
         }
@@ -2153,13 +2159,55 @@ export class CustomerHomePage {
     }
   }
 
-  private setCartFeedback(message: string, kind: 'info' | 'error' | 'success') {
+  private setCartFeedback(message: string, kind: 'info' | 'error' | 'success', announce = true) {
     this.cartFeedbackMessage.set(message);
     this.cartFeedbackKind.set(kind);
+
+    if (!announce) {
+      return;
+    }
+
+    if (kind === 'success') {
+      this.feedbackModal.showSuccess(message);
+      return;
+    }
+
+    if (kind === 'error') {
+      this.feedbackModal.showError();
+    }
   }
 
-  private setAddressFeedback(message: string, kind: 'info' | 'error' | 'success') {
+  private setAddressFeedback(message: string, kind: 'info' | 'error' | 'success', announce = true) {
     this.addressFeedbackMessage.set(message);
     this.addressFeedbackKind.set(kind);
+
+    if (!announce) {
+      return;
+    }
+
+    if (kind === 'success') {
+      this.feedbackModal.showSuccess(message);
+      return;
+    }
+
+    if (kind === 'error') {
+      this.feedbackModal.showError();
+    }
+  }
+
+  private setCheckoutErrorMessage(message: string, announce = true) {
+    this.checkoutErrorMessage.set(message);
+
+    if (announce) {
+      this.feedbackModal.showError();
+    }
+  }
+
+  private setCheckoutSuccessMessage(message: string, announce = true) {
+    this.checkoutSuccessMessage.set(message);
+
+    if (announce) {
+      this.feedbackModal.showSuccess(message);
+    }
   }
 }
