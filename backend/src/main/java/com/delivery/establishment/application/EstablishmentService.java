@@ -1,7 +1,9 @@
 package com.delivery.establishment.application;
 
+import java.util.Locale;
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
@@ -52,7 +54,15 @@ public class EstablishmentService {
             toAddress(request.address())
         );
 
-        return EstablishmentResponse.from(establishmentRepository.save(establishment));
+        try {
+            return EstablishmentResponse.from(establishmentRepository.saveAndFlush(establishment));
+        } catch (DataIntegrityViolationException ex) {
+            if (isDuplicatedCnpjViolation(ex)) {
+                throw new BusinessException("Ja existe um estabelecimento cadastrado com este CNPJ");
+            }
+
+            throw ex;
+        }
     }
 
     @Transactional
@@ -78,5 +88,22 @@ public class EstablishmentService {
             request.state(),
             request.complement()
         );
+    }
+
+    private boolean isDuplicatedCnpjViolation(DataIntegrityViolationException ex) {
+        Throwable mostSpecificCause = ex.getMostSpecificCause();
+        String message = mostSpecificCause != null ? mostSpecificCause.getMessage() : ex.getMessage();
+
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+
+        String normalizedMessage = message.toLowerCase(Locale.ROOT);
+        return normalizedMessage.contains("establishments_cnpj_key")
+            || (normalizedMessage.contains("cnpj")
+                && (normalizedMessage.contains("duplicate")
+                    || normalizedMessage.contains("duplic")
+                    || normalizedMessage.contains("unique")
+                    || normalizedMessage.contains("uniq")));
     }
 }

@@ -27,6 +27,7 @@ import com.delivery.establishment.domain.EstablishmentCategory;
 import com.delivery.establishment.infrastructure.EstablishmentRepository;
 import com.delivery.product.api.CreateProductRequest;
 import com.delivery.product.api.ProductResponse;
+import com.delivery.product.api.UpdateProductRequest;
 import com.delivery.product.domain.Product;
 import com.delivery.product.domain.ProductCategory;
 import com.delivery.product.infrastructure.ProductRepository;
@@ -90,7 +91,7 @@ class ProductServiceTest {
     void shouldListProductsByEstablishment() {
         Establishment establishment = sampleEstablishment(sampleMerchant());
         when(establishmentRepository.existsById(establishment.getId())).thenReturn(true);
-        when(productRepository.findAllByEstablishmentIdOrderByNameAsc(establishment.getId()))
+        when(productRepository.findAllByEstablishmentIdAndAvailableTrueOrderByNameAsc(establishment.getId()))
             .thenReturn(List.of(new Product(
                 establishment,
                 "X-Burger",
@@ -105,6 +106,88 @@ class ProductServiceTest {
 
         assertThat(products).hasSize(1);
         assertThat(products.get(0).name()).isEqualTo("X-Burger");
+    }
+
+    @Test
+    void shouldListAllProductsForOwnedEstablishment() {
+        Account merchant = sampleMerchant();
+        Establishment establishment = sampleEstablishment(merchant);
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(establishmentRepository.findById(establishment.getId())).thenReturn(Optional.of(establishment));
+        when(productRepository.findAllByEstablishmentIdOrderByNameAsc(establishment.getId()))
+            .thenReturn(List.of(
+                new Product(
+                    establishment,
+                    "Suco",
+                    "Natural",
+                    ProductCategory.DRINK,
+                    new BigDecimal("8.00"),
+                    "https://images.delivery.local/suco.jpg",
+                    false
+                )
+            ));
+
+        List<ProductResponse> products = productService.listMineByEstablishment(establishment.getId());
+
+        assertThat(products).hasSize(1);
+        assertThat(products.get(0).available()).isFalse();
+    }
+
+    @Test
+    void shouldUpdateOwnedProduct() {
+        Account merchant = sampleMerchant();
+        Establishment establishment = sampleEstablishment(merchant);
+        Product product = new Product(
+            establishment,
+            "X-Burger",
+            "Hamburguer artesanal com queijo",
+            ProductCategory.MAIN_COURSE,
+            new BigDecimal("32.90"),
+            "https://images.delivery.local/x-burger.jpg",
+            true
+        );
+        UpdateProductRequest request = new UpdateProductRequest(
+            "X-Salada",
+            "Hamburguer com alface e tomate",
+            ProductCategory.MAIN_COURSE,
+            new BigDecimal("35.50"),
+            "https://images.delivery.local/x-salada.jpg",
+            true
+        );
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(establishmentRepository.findById(establishment.getId())).thenReturn(Optional.of(establishment));
+        when(productRepository.findByIdAndEstablishmentId(product.getId(), establishment.getId())).thenReturn(Optional.of(product));
+        when(productRepository.save(product)).thenReturn(product);
+
+        ProductResponse response = productService.update(establishment.getId(), product.getId(), request);
+
+        verify(productRepository).save(product);
+        assertThat(response.name()).isEqualTo("X-Salada");
+        assertThat(response.price()).isEqualByComparingTo("35.50");
+    }
+
+    @Test
+    void shouldDeactivateOwnedProductAndKeepHistory() {
+        Account merchant = sampleMerchant();
+        Establishment establishment = sampleEstablishment(merchant);
+        Product product = new Product(
+            establishment,
+            "X-Burger",
+            "Hamburguer artesanal com queijo",
+            ProductCategory.MAIN_COURSE,
+            new BigDecimal("32.90"),
+            "https://images.delivery.local/x-burger.jpg",
+            true
+        );
+        when(currentAccountService.requireMerchant()).thenReturn(merchant);
+        when(establishmentRepository.findById(establishment.getId())).thenReturn(Optional.of(establishment));
+        when(productRepository.findByIdAndEstablishmentId(product.getId(), establishment.getId())).thenReturn(Optional.of(product));
+        when(productRepository.save(product)).thenReturn(product);
+
+        ProductResponse response = productService.deactivate(establishment.getId(), product.getId());
+
+        verify(productRepository).save(product);
+        assertThat(response.available()).isFalse();
     }
 
     private CreateProductRequest sampleRequest() {
