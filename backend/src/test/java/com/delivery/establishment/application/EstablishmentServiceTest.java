@@ -3,6 +3,7 @@ package com.delivery.establishment.application;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.dao.DataIntegrityViolationException;
 import static org.mockito.ArgumentMatchers.any;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -58,11 +59,29 @@ class EstablishmentServiceTest {
         CreateEstablishmentRequest request = sampleRequest();
         when(currentAccountService.requireMerchant()).thenReturn(sampleMerchant());
         when(establishmentRepository.existsByCnpj(request.cnpj())).thenReturn(false);
-        when(establishmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(establishmentRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         establishmentService.create(request);
 
-        verify(establishmentRepository).save(any());
+        verify(establishmentRepository).saveAndFlush(any());
+    }
+
+    @Test
+    void shouldTranslateDuplicatedCnpjFromDatabaseConstraint() {
+        CreateEstablishmentRequest request = sampleRequest();
+        when(currentAccountService.requireMerchant()).thenReturn(sampleMerchant());
+        when(establishmentRepository.existsByCnpj(request.cnpj())).thenReturn(false);
+        when(establishmentRepository.saveAndFlush(any()))
+            .thenThrow(
+                new DataIntegrityViolationException(
+                    "constraint violation",
+                    new RuntimeException("duplicate key value violates unique constraint \"establishments_cnpj_key\"")
+                )
+            );
+
+        assertThatThrownBy(() -> establishmentService.create(request))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("CNPJ");
     }
 
     private CreateEstablishmentRequest sampleRequest() {

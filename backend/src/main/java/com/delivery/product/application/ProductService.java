@@ -13,6 +13,7 @@ import com.delivery.establishment.domain.Establishment;
 import com.delivery.establishment.infrastructure.EstablishmentRepository;
 import com.delivery.product.api.CreateProductRequest;
 import com.delivery.product.api.ProductResponse;
+import com.delivery.product.api.UpdateProductRequest;
 import com.delivery.product.domain.Product;
 import com.delivery.product.infrastructure.ProductRepository;
 import com.delivery.shared.domain.ResourceNotFoundException;
@@ -39,13 +40,7 @@ public class ProductService {
 
     @Transactional
     public ProductResponse create(UUID establishmentId, CreateProductRequest request) {
-        Account currentAccount = currentAccountService.requireMerchant();
-        Establishment establishment = establishmentRepository.findById(establishmentId)
-            .orElseThrow(() -> new ResourceNotFoundException("Estabelecimento nao encontrado"));
-
-        if (!establishment.isOwnedBy(currentAccount.getId())) {
-            throw new AccessDeniedException("Voce nao pode cadastrar produtos para outra loja");
-        }
+        Establishment establishment = loadOwnedEstablishment(establishmentId);
 
         Product product = new Product(
             establishment,
@@ -66,8 +61,60 @@ public class ProductService {
             throw new ResourceNotFoundException("Estabelecimento nao encontrado");
         }
 
+        return productRepository.findAllByEstablishmentIdAndAvailableTrueOrderByNameAsc(establishmentId).stream()
+            .map(ProductResponse::from)
+            .toList();
+    }
+
+    @Transactional
+    public List<ProductResponse> listMineByEstablishment(UUID establishmentId) {
+        loadOwnedEstablishment(establishmentId);
+
         return productRepository.findAllByEstablishmentIdOrderByNameAsc(establishmentId).stream()
             .map(ProductResponse::from)
             .toList();
+    }
+
+    @Transactional
+    public ProductResponse update(UUID establishmentId, UUID productId, UpdateProductRequest request) {
+        loadOwnedEstablishment(establishmentId);
+        Product product = loadOwnedProduct(establishmentId, productId);
+
+        product.updateDetails(
+            request.name(),
+            request.description(),
+            request.category(),
+            request.price(),
+            request.imageUrl(),
+            request.available()
+        );
+
+        return ProductResponse.from(productRepository.save(product));
+    }
+
+    @Transactional
+    public ProductResponse deactivate(UUID establishmentId, UUID productId) {
+        loadOwnedEstablishment(establishmentId);
+        Product product = loadOwnedProduct(establishmentId, productId);
+        product.deactivate();
+
+        return ProductResponse.from(productRepository.save(product));
+    }
+
+    private Establishment loadOwnedEstablishment(UUID establishmentId) {
+        Account currentAccount = currentAccountService.requireMerchant();
+        Establishment establishment = establishmentRepository.findById(establishmentId)
+            .orElseThrow(() -> new ResourceNotFoundException("Estabelecimento nao encontrado"));
+
+        if (!establishment.isOwnedBy(currentAccount.getId())) {
+            throw new AccessDeniedException("Voce nao pode gerenciar produtos de outra loja");
+        }
+
+        return establishment;
+    }
+
+    private Product loadOwnedProduct(UUID establishmentId, UUID productId) {
+        return productRepository.findByIdAndEstablishmentId(productId, establishmentId)
+            .orElseThrow(() -> new ResourceNotFoundException("Produto nao encontrado"));
     }
 }
