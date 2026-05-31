@@ -37,8 +37,12 @@ describe('MerchantHomePage', () => {
   };
 
   const productApiStub = {
-    listByEstablishment: jasmine.createSpy('listByEstablishment').and.returnValue(of([sampleProduct()])),
-    create: jasmine.createSpy('create').and.returnValue(of(sampleProduct()))
+    listMineByEstablishment: jasmine.createSpy('listMineByEstablishment').and.returnValue(of([sampleProduct()])),
+    create: jasmine.createSpy('create').and.returnValue(of(sampleProduct())),
+    update: jasmine.createSpy('update').and.callFake((_establishmentId: string, productId: string) =>
+      of({ ...sampleProduct(), id: productId, name: 'X-Salada' })
+    ),
+    deactivate: jasmine.createSpy('deactivate').and.callFake(() => of({ ...sampleProduct(), available: false }))
   };
 
   const orderApiStub = {
@@ -58,8 +62,10 @@ describe('MerchantHomePage', () => {
     authSessionStub.refresh.calls.reset();
     establishmentApiStub.listMine.calls.reset();
     establishmentApiStub.create.calls.reset();
-    productApiStub.listByEstablishment.calls.reset();
+    productApiStub.listMineByEstablishment.calls.reset();
     productApiStub.create.calls.reset();
+    productApiStub.update.calls.reset();
+    productApiStub.deactivate.calls.reset();
     orderApiStub.listMine.calls.reset();
     orderApiStub.updateStatus.calls.reset();
     viaCepApiStub.lookup.calls.reset();
@@ -90,11 +96,78 @@ describe('MerchantHomePage', () => {
     fixture.detectChanges();
 
     expect(orderApiStub.listMine).toHaveBeenCalledWith('establishment-1');
+    expect(productApiStub.listMineByEstablishment).toHaveBeenCalledWith('establishment-1');
     expect(fixture.componentInstance.orders()).toHaveSize(1);
 
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.textContent).toContain('Pedidos recebidos');
     expect(compiled.textContent).toContain('X-Burger');
+  });
+
+  it('keeps new store registration as a secondary workflow when the merchant already has stores', () => {
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    const secondaryWorkflow = compiled.querySelector('details.secondary-workflow') as HTMLDetailsElement | null;
+
+    expect(secondaryWorkflow).not.toBeNull();
+    expect(secondaryWorkflow?.hasAttribute('open')).toBeFalse();
+    expect(compiled.textContent?.indexOf('Pedidos recebidos')).toBeLessThan(compiled.textContent?.indexOf('Cadastrar nova loja') ?? Infinity);
+    expect(compiled.textContent).toContain('CNPJ ja cadastrado na base');
+  });
+
+  it('opens the product form inside a modal for creating a new item', () => {
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.openCreateProductModal();
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(component.isProductModalOpen()).toBeTrue();
+    expect(compiled.textContent).toContain('Adicionar produto');
+  });
+
+  it('updates an existing product through the merchant catalog modal', () => {
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.openEditProductModal(component.orderedProducts()[0]);
+    component.productForm.setValue({
+      name: 'X-Salada',
+      description: 'Pao, carne, queijo e salada',
+      category: 'MAIN_COURSE',
+      price: 35.5,
+      imageUrl: 'https://images.delivery.local/x-salada.jpg',
+      available: true
+    });
+
+    component.submitProduct();
+
+    expect(productApiStub.update).toHaveBeenCalledWith('establishment-1', 'product-1', {
+      name: 'X-Salada',
+      description: 'Pao, carne, queijo e salada',
+      category: 'MAIN_COURSE',
+      price: 35.5,
+      imageUrl: 'https://images.delivery.local/x-salada.jpg',
+      available: true
+    });
+    expect(component.productSuccessMessage()).toContain('atualizado');
+  });
+
+  it('deactivates a product and keeps it visible in the catalog history', () => {
+    const fixture = TestBed.createComponent(MerchantHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    component.deactivateProduct(component.orderedProducts()[0]);
+
+    expect(productApiStub.deactivate).toHaveBeenCalledWith('establishment-1', 'product-1');
+    expect(component.products()).toHaveSize(1);
+    expect(component.products()[0].available).toBeFalse();
   });
 
   it('advances the order to the next valid status', () => {

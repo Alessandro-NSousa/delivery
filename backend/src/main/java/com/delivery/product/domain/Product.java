@@ -76,6 +76,26 @@ public class Product {
         this.available = available;
     }
 
+    public void updateDetails(
+        String name,
+        String description,
+        ProductCategory category,
+        BigDecimal price,
+        String imageUrl,
+        boolean available
+    ) {
+        this.name = name;
+        this.description = description;
+        this.category = category;
+        this.price = price;
+        this.imageUrl = imageUrl;
+        this.available = available;
+    }
+
+    public void deactivate() {
+        available = false;
+    }
+
     @PrePersist
     void onCreate() {
         OffsetDateTime now = OffsetDateTime.now();

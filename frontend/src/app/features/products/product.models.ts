@@ -22,6 +22,8 @@ export interface CreateProductRequest {
   available: boolean;
 }
 
+export type UpdateProductRequest = CreateProductRequest;
+
 export const productCategoryOptions: Array<{ value: ProductCategory; label: string }> = [
   { value: 'APPETIZER', label: 'Entrada' },
   { value: 'MAIN_COURSE', label: 'Prato principal' },
