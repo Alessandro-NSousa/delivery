@@ -10,6 +10,7 @@ import { Establishment } from '../establishments/establishment.models';
 import { CreateOrderRequest, DeliveryAddress, Order } from '../orders/order.models';
 import { OrderApi } from '../orders/order-api';
 import { ProductApi } from '../products/product-api';
+import { Product } from '../products/product.models';
 import { CustomerAddressApi } from './customer-address-api';
 import { SavedCustomerAddress } from './customer-address.models';
 import { CustomerCartService } from './customer-cart.service';
@@ -109,6 +110,7 @@ describe('CustomerHomePage', () => {
     customerAddressApiStub.update.and.returnValue(of(sampleSavedAddress('address-1', 'Casa editada', true, sampleDeliveryAddress('200'))));
     customerAddressApiStub.setDefault.and.returnValue(of(sampleSavedAddress('address-1', 'Casa', true)));
     customerAddressApiStub.delete.and.returnValue(of(void 0));
+    customerCartStub.addProduct.and.returnValue('added');
 
     currentAccount.set({
       id: 'customer-1',
@@ -159,6 +161,48 @@ describe('CustomerHomePage', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.textContent).toContain('Endereco selecionado');
     expect(compiled.textContent).toContain('Casa');
+  });
+
+  it('opens a confirmation modal when another establishment product conflicts with the current cart', () => {
+    customerCartStub.addProduct.and.returnValue('conflict');
+
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    const product = sampleProduct();
+
+    component.addToCart(product);
+    fixture.detectChanges();
+
+    expect(component.cartConflictProduct()).toEqual(product);
+    expect(component.cartFeedbackMessage()).toContain('Sua sacola ja esta vinculada a Lanche Bom');
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('Esvaziar sacola para continuar?');
+    expect(compiled.textContent).toContain('Pizza grande');
+    expect(compiled.textContent).toContain('Deseja fazer isso agora?');
+  });
+
+  it('clears the cart and retries the requested product after confirmation', () => {
+    customerCartStub.addProduct.and.returnValues('conflict', 'added');
+
+    const fixture = TestBed.createComponent(CustomerHomePage);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance;
+    const product = sampleProduct();
+
+    component.addToCart(product);
+    component.confirmCartReplacement();
+    fixture.detectChanges();
+
+    expect(customerCartStub.clear).toHaveBeenCalled();
+    expect(customerCartStub.addProduct.calls.count()).toBe(2);
+    expect(customerCartStub.addProduct.calls.argsFor(0)).toEqual([product]);
+    expect(customerCartStub.addProduct.calls.argsFor(1)).toEqual([product]);
+    expect(component.cartConflictProduct()).toBeNull();
+    expect(component.cartFeedbackMessage()).toBe('Sacola esvaziada e Pizza grande adicionado a sacola.');
   });
 
   it('starts with the address section collapsed and expands on demand', () => {
@@ -360,6 +404,21 @@ describe('CustomerHomePage', () => {
       label,
       defaultAddress,
       address
+    };
+  }
+
+  function sampleProduct(overrides: Partial<Product> = {}): Product {
+    return {
+      id: overrides.id ?? 'product-2',
+      establishmentId: overrides.establishmentId ?? 'establishment-2',
+      name: overrides.name ?? 'Pizza grande',
+      description: overrides.description ?? 'Molho de tomate, queijo e oregano.',
+      category: overrides.category ?? 'MAIN_COURSE',
+      price: overrides.price ?? 42.5,
+      imageUrl: overrides.imageUrl ?? 'https://images.delivery.local/pizza-grande.jpg',
+      available: overrides.available ?? true,
+      createdAt: overrides.createdAt ?? '2026-05-19T18:10:00Z',
+      updatedAt: overrides.updatedAt ?? '2026-05-19T18:10:00Z'
     };
   }
 

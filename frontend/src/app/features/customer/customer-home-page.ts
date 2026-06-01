@@ -671,6 +671,35 @@ type SavedAddressMaskedField = 'zipCode' | 'state';
           </section>
         }
       }
+
+      @if (cartConflictProduct(); as conflictProduct) {
+        <section
+          role="presentation"
+          style="position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 24px; background: rgba(23, 49, 38, 0.28); backdrop-filter: blur(6px);"
+        >
+          <article
+            class="panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cart-conflict-title"
+            aria-describedby="cart-conflict-description"
+            style="width: min(100%, 460px); display: grid; gap: 18px;"
+          >
+            <p class="label" style="margin: 0;">Troca de loja</p>
+            <h2 id="cart-conflict-title">Esvaziar sacola para continuar?</h2>
+            <p id="cart-conflict-description">
+              Sua sacola atual tem itens de {{ cartConflictEstablishmentName() }}. Para adicionar {{ conflictProduct.name }},
+              precisamos esvaziar a sacola atual. Deseja fazer isso agora?
+            </p>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap;">
+              <button type="button" class="secondary-button" (click)="dismissCartConflictModal()">Agora nao</button>
+              <button type="button" class="primary-link" (click)="confirmCartReplacement()">Esvaziar e adicionar</button>
+            </div>
+          </article>
+        </section>
+      }
+
     </main>
   `,
   styles: `
@@ -1341,6 +1370,7 @@ export class CustomerHomePage {
   readonly cartSubtotal = this.cart.subtotal;
   readonly cartHasUnavailableItems = this.cart.hasUnavailableItems;
   readonly cartEstablishmentId = this.cart.establishmentId;
+  readonly cartConflictProduct = signal<Product | null>(null);
   readonly cartFeedbackMessage = signal('');
   readonly cartFeedbackKind = signal<'info' | 'error' | 'success'>('info');
   readonly checkoutErrorMessage = signal('');
@@ -1374,6 +1404,7 @@ export class CustomerHomePage {
   readonly cartEstablishment = computed(
     () => this.establishments().find((establishment) => establishment.id === this.cartEstablishmentId()) ?? null
   );
+  readonly cartConflictEstablishmentName = computed(() => this.cartEstablishment()?.tradeName ?? 'outra loja');
 
   readonly paymentForm = this.formBuilder.nonNullable.group({
     paymentMethod: ['PIX' as OrderPaymentMethod, [Validators.required]],
@@ -1440,6 +1471,7 @@ export class CustomerHomePage {
 
   addToCart(product: Product) {
     this.clearOrderFeedback();
+    this.dismissCartConflictModal();
 
     const result = this.cart.addProduct(product);
     if (result === 'added') {
@@ -1460,10 +1492,12 @@ export class CustomerHomePage {
     const cartEstablishment = this.cartEstablishment();
     this.setCartFeedback(
       cartEstablishment
-        ? `Sua sacola ja esta vinculada a ${cartEstablishment.tradeName}. Limpe a sacola ou finalize o pedido atual.`
-        : 'Sua sacola ja contem itens de outra loja. Limpe a sacola ou finalize o pedido atual.',
-      'error'
+        ? `Sua sacola ja esta vinculada a ${cartEstablishment.tradeName}. Esvazie a sacola para adicionar itens de outra loja.`
+        : 'Sua sacola ja contem itens de outra loja. Esvazie a sacola para adicionar este produto.',
+      'error',
+      false
     );
+    this.cartConflictProduct.set(product);
   }
 
   updateCartItemQuantity(productId: string, quantity: number) {
@@ -1480,8 +1514,36 @@ export class CustomerHomePage {
 
   clearCart() {
     this.clearOrderFeedback();
+    this.dismissCartConflictModal();
     this.cart.clear();
     this.setCartFeedback('Sacola limpa.', 'success');
+  }
+
+  dismissCartConflictModal() {
+    this.cartConflictProduct.set(null);
+  }
+
+  confirmCartReplacement() {
+    const product = this.cartConflictProduct();
+    if (!product) {
+      return;
+    }
+
+    this.dismissCartConflictModal();
+    this.cart.clear();
+
+    const result = this.cart.addProduct(product);
+    if (result === 'added' || result === 'merged') {
+      this.setCartFeedback(`Sacola esvaziada e ${product.name} adicionado a sacola.`, 'success');
+      return;
+    }
+
+    if (result === 'unavailable') {
+      this.setCartFeedback('Itens indisponiveis nao podem ser adicionados a sacola.', 'error');
+      return;
+    }
+
+    this.setCartFeedback('Nao foi possivel atualizar a sacola agora. Tente novamente.', 'error');
   }
 
   focusCartEstablishment() {
