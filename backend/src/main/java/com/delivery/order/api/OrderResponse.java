@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import com.delivery.account.domain.Account;
 import com.delivery.establishment.domain.Address;
 import com.delivery.order.domain.Order;
 import com.delivery.order.domain.OrderPaymentMethod;
@@ -13,6 +14,7 @@ import com.delivery.order.domain.OrderStatus;
 public record OrderResponse(
     UUID id,
     UUID customerId,
+    CustomerSummaryResponse customer,
     UUID establishmentId,
     OrderStatus status,
     OrderPaymentMethod paymentMethod,
@@ -29,6 +31,7 @@ public record OrderResponse(
         return new OrderResponse(
             order.getId(),
             order.getCustomer().getId(),
+            CustomerSummaryResponse.from(order.getCustomer()),
             order.getEstablishment().getId(),
             order.getStatus(),
             order.getPaymentMethod(),
@@ -40,6 +43,20 @@ public record OrderResponse(
             order.getCreatedAt(),
             order.getUpdatedAt()
         );
+    }
+
+    public record CustomerSummaryResponse(
+        String displayName,
+        String email
+    ) {
+
+        public static CustomerSummaryResponse from(Account account) {
+            if (account == null) {
+                return null;
+            }
+
+            return new CustomerSummaryResponse(account.getDisplayName(), account.getEmail());
+        }
     }
 
     public record DeliveryAddressResponse(

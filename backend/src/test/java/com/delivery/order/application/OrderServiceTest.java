@@ -220,6 +220,9 @@ class OrderServiceTest {
 
         verify(orderRepository).findAllByEstablishmentOwnerIdOrderByCreatedAtDesc(merchant.getId());
         assertThat(response).extracting(OrderResponse::id).containsExactly(firstOrder.getId(), secondOrder.getId());
+        assertThat(response.get(0).customer()).isNotNull();
+        assertThat(response.get(0).customer().displayName()).isEqualTo("Customer Example");
+        assertThat(response.get(0).customer().email()).isEqualTo("customer@example.com");
     }
 
     @Test

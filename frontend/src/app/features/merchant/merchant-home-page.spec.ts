@@ -102,6 +102,8 @@ describe('MerchantHomePage', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.textContent).toContain('Pedidos recebidos');
     expect(compiled.textContent).toContain('X-Burger');
+    expect(compiled.textContent).toContain('Customer Example');
+    expect(compiled.textContent).toContain('customer@example.com');
   });
 
   it('keeps new store registration as a secondary workflow when the merchant already has stores', () => {
@@ -322,6 +324,10 @@ describe('MerchantHomePage', () => {
     return {
       id: 'order-1',
       customerId: 'customer-1',
+      customer: {
+        displayName: 'Customer Example',
+        email: 'customer@example.com'
+      },
       establishmentId: 'establishment-1',
       status: 'PENDING_CONFIRMATION',
       paymentMethod: 'PIX',
