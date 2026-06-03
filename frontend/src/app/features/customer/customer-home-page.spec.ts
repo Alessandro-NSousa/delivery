@@ -462,6 +462,10 @@ describe('CustomerHomePage', () => {
     return {
       id: 'order-1',
       customerId: 'customer-1',
+      customer: {
+        displayName: 'Customer Example',
+        email: 'customer@example.com'
+      },
       establishmentId: 'establishment-1',
       status: 'PENDING_CONFIRMATION',
       paymentMethod: 'CASH_ON_DELIVERY',

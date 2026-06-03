@@ -33,9 +33,15 @@ export interface OrderItem {
   lineTotal: number;
 }
 
+export interface OrderCustomer {
+  displayName: string;
+  email: string;
+}
+
 export interface Order {
   id: string;
   customerId: string;
+  customer: OrderCustomer;
   establishmentId: string;
   status: OrderStatus;
   paymentMethod: OrderPaymentMethod;

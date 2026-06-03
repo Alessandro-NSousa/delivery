@@ -241,7 +241,17 @@ type EstablishmentMaskedField = 'cnpj' | 'phone' | 'zipCode' | 'state';
                           <span>{{ formatDateTime(order.createdAt) }}</span>
                         </div>
 
-                        <p class="order-address">{{ formatDeliveryAddress(order.deliveryAddress) }}</p>
+                        @if (order.customer; as customer) {
+                          <div class="order-customer">
+                            <div>
+                              <p class="label inner">Cliente</p>
+                              <strong>{{ customer.displayName }}</strong>
+                            </div>
+                            <a class="customer-contact" [href]="'mailto:' + customer.email">{{ customer.email }}</a>
+                          </div>
+                        }
+
+                        <p class="order-address">Entrega em {{ formatDeliveryAddress(order.deliveryAddress) }}</p>
 
                         <div class="order-items">
                           @for (item of order.items; track item.productId) {
@@ -1418,6 +1428,7 @@ type EstablishmentMaskedField = 'cnpj' | 'phone' | 'zipCode' | 'state';
     }
 
     .order-meta,
+    .order-customer,
     .order-address,
     .order-note,
     .order-finished {
@@ -1428,6 +1439,29 @@ type EstablishmentMaskedField = 'cnpj' | 'phone' | 'zipCode' | 'state';
     .order-meta,
     .order-item-row {
       font-size: 0.92rem;
+    }
+
+    .order-customer {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(29, 92, 70, 0.08);
+    }
+
+    .order-customer strong {
+      color: #173126;
+    }
+
+    .customer-contact {
+      color: #1d5c46;
+      font-weight: 600;
+      text-decoration: none;
+      word-break: break-word;
+    }
+
+    .customer-contact:hover {
+      text-decoration: underline;
     }
 
     .order-items {
